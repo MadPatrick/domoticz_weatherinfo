@@ -12,8 +12,8 @@
         <param field="Mode3" label="Poll-interval (min)" width="80px"  required="true" default="10"/>
         <param field="Mode6" label="Debug" width="75px">
             <options>
-                <option label="True" value="Debug"/>
-                <option label="False" value="Normal" default="true"/>
+                <option label="Yes" value="Debug"/>
+                <option label="No" value="Normal" default="true"/>
             </options>
         </param>
     </params>
@@ -21,10 +21,11 @@
 """
 
 import Domoticz
-import math
+import re
 import urllib.request
 import urllib.error
 import threading
+from typing import Optional
 
 # ---------------------------------------------------------------------------
 # Constanten
@@ -46,7 +47,7 @@ def raw_to_mm(raw: float) -> float:
 def fmt(value: float, decimals: int = 1) -> str:
     return f"{value:.{decimals}f}"
 
-def build_status(prefix: str, mm_now: float, mm_max: float | None):
+def build_status(prefix: str, mm_now: float, mm_max: Optional[float]):
     html = f"{prefix} <font color='yellow'>{fmt(mm_now)} mm</font>"
     text = f"{prefix} {fmt(mm_now)} mm"
     if mm_max is not None and mm_max > mm_now:
@@ -88,13 +89,13 @@ def parse_buienradar(data: str):
         counter += 1
 
     return {
-        "mm_now":       raw_to_mm(max_now_raw),
-        "mm_soon":      raw_to_mm(max_soon_raw),
-        "mm_max":       raw_to_mm(max_raw),
-        "rain_now_avg": rain_now_sum / 2,
-        "max_now_raw":  max_now_raw,
-        "max_soon_raw": max_soon_raw,
-        "max_raw":      max_raw,
+        "mm_now":        raw_to_mm(max_now_raw),
+        "mm_soon":       raw_to_mm(max_soon_raw),
+        "mm_max":        raw_to_mm(max_raw),
+        "rain_now_avg":  rain_now_sum / 2,
+        "max_now_raw":   max_now_raw,
+        "max_soon_raw":  max_soon_raw,
+        "max_raw":       max_raw,
         "first_rain_at": first_rain_at,
     }
 
@@ -136,7 +137,7 @@ class BasePlugin:
     # ------------------------------------------------------------------
 
     def onStart(self):
-        self._debug = (Parameters["Mode6"].lower() == "true")
+        self._debug = (Parameters["Mode6"] == "Debug")
         if self._debug:
             Domoticz.Debugging(1)
 
@@ -201,9 +202,7 @@ class BasePlugin:
             Domoticz.Error("Lege response ontvangen van Buienradar")
             return
 
-        # Sanity-check: minstens één "getal|tijd"-regel verwacht
-        import re
-        if not re.search(r"\d+|\d+:\d+", data):
+        if not re.search(r"\d+\|\d+:\d+", data):
             Domoticz.Error("Onverwacht formaat in Buienradar response")
             return
 
@@ -217,7 +216,7 @@ class BasePlugin:
         # --- Rain-device bijwerken ---
         rain_dev = Devices[UNIT_RAIN]
         try:
-            parts        = rain_dev.sValue.split(";") if rain_dev.sValue else []
+            parts         = rain_dev.sValue.split(";") if rain_dev.sValue else []
             current_rate  = float(parts[0]) if len(parts) > 0 else 0.0
             current_total = float(parts[1]) if len(parts) > 1 else 0.0
         except ValueError:
@@ -244,6 +243,6 @@ class BasePlugin:
 
 _plugin = BasePlugin()
 
-def onStart():           _plugin.onStart()
-def onStop():            _plugin.onStop()
-def onHeartbeat():       _plugin.onHeartbeat()
+def onStart():    _plugin.onStart()
+def onStop():     _plugin.onStop()
+def onHeartbeat(): _plugin.onHeartbeat()
