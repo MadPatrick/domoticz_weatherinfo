@@ -4,7 +4,7 @@
         <h2>Buienradar</h2>
         <p>Version 1.0.1</p>
         Haalt de komende neerslagverwachting op via Buienradar en werkt
-        twee devices bij: een Rain-sensor en een tekst-device.
+        twee devices bij: een Regen-sensor en een Tekst-device.
     </description>
     <params>
         <param field="Mode1" label="Breedtegraad (lat)"  width="80px"  required="true" default="52.37"/>
@@ -31,7 +31,7 @@ from typing import Optional
 # Constanten
 # ---------------------------------------------------------------------------
 BUIENRADAR_URL = "https://gpsgadget.buienradar.nl/data/raintext?lat={lat}&lon={lon}"
-UNIT_RAIN = 1   # Rain-device (RegenData)
+UNIT_RAIN = 1   # Regen-device (Neerslag)
 UNIT_TEXT = 2   # Tekst-device (Buienradar)
 
 # ---------------------------------------------------------------------------
@@ -152,9 +152,9 @@ class BasePlugin:
 
         # Devices aanmaken indien nog niet aanwezig
         if UNIT_RAIN not in Devices:
-            Domoticz.Device(Name="RegenData", Unit=UNIT_RAIN,
+            Domoticz.Device(Name="Neerslag", Unit=UNIT_RAIN,
                             TypeName="Rain", Used=1).Create()
-            Domoticz.Log("Device 'RegenData' aangemaakt")
+            Domoticz.Log("Device 'Neerslag' aangemaakt")
 
         if UNIT_TEXT not in Devices:
             Domoticz.Device(Name="Buienradar", Unit=UNIT_TEXT,
@@ -213,7 +213,7 @@ class BasePlugin:
         p = parse_buienradar(data)
         status_html, status_log = build_status_text(p)
 
-        # --- Rain-device bijwerken ---
+        # --- regen-device bijwerken ---
         rain_dev = Devices[UNIT_RAIN]
         try:
             parts         = rain_dev.sValue.split(";") if rain_dev.sValue else []
