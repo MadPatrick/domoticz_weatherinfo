@@ -48,11 +48,13 @@ def fmt(value: float, decimals: int = 1) -> str:
     return f"{value:.{decimals}f}"
 
 def build_status(prefix: str, mm_now: float, mm_max: Optional[float]):
-    html = f"{prefix} <font color='yellow'>{fmt(mm_now)} mm/u</font>"
-    text = f"{prefix} {fmt(mm_now)} mm/u"
     if mm_max is not None and mm_max > mm_now:
-        html += f" tot <font color='yellow'>{fmt(mm_max)} mm/u</font>"
-        text += f" tot {fmt(mm_max)} mm/u"
+        html = (f"{prefix} <font color='yellow'>{fmt(mm_now)}</font> tot "
+                f"<font color='yellow'>{fmt(mm_max)} mm/u</font>")
+        text = f"{prefix} {fmt(mm_now)} tot {fmt(mm_max)} mm/u"
+    else:
+        html = f"{prefix} <font color='yellow'>{fmt(mm_now)} mm/u</font>"
+        text = f"{prefix} {fmt(mm_now)} mm/u"
     return html, text
 
 def parse_buienradar(data: str):
