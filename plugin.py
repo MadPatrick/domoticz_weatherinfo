@@ -222,8 +222,9 @@ class BasePlugin:
         except ValueError:
             current_rate, current_total = 0.0, 0.0
 
-        new_rate  = p["mm_now"] #* 12
-        new_total = current_total + p["rain_now_avg"] / (60 / self._interval)
+        interval_factor = 60 / self._interval
+        new_rate  = p["mm_now"] * interval_factor
+        new_total = current_total + p["rain_now_avg"] / interval_factor
 
         new_svalue     = f"{new_rate:.2f};{new_total:.2f}"
         current_svalue = f"{current_rate:.2f};{current_total:.2f}"
