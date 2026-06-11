@@ -48,11 +48,11 @@ def fmt(value: float, decimals: int = 1) -> str:
     return f"{value:.{decimals}f}"
 
 def build_status(prefix: str, mm_now: float, mm_max: Optional[float]):
-    html = f"{prefix} <font color='yellow'>{fmt(mm_now)} mm</font>"
-    text = f"{prefix} {fmt(mm_now)} mm"
+    html = f"{prefix} <font color='yellow'>{fmt(mm_now)} mm/u</font>"
+    text = f"{prefix} {fmt(mm_now)} mm/u"
     if mm_max is not None and mm_max > mm_now:
-        html += f" tot <font color='yellow'>{fmt(mm_max)} mm</font>"
-        text += f" tot {fmt(mm_max)} mm"
+        html += f" tot <font color='yellow'>{fmt(mm_max)} mm/u</font>"
+        text += f" tot {fmt(mm_max)} mm/u"
     return html, text
 
 def parse_buienradar(data: str):
@@ -110,9 +110,9 @@ def build_status_text(p: dict):
         return build_status("Regen verwacht", p["mm_soon"], mm_max_arg)
 
     if p["first_rain_at"]:
-        html = (f"<font color='yellow'>{fmt(p['mm_max'])} mm</font> regen verwacht om "
+        html = (f"<font color='yellow'>{fmt(p['mm_max'])} mm/u</font> regen verwacht om "
                 f"<font color='yellow'>{p['first_rain_at']}</font>")
-        text = f"{fmt(p['mm_max'])} mm regen verwacht om {p['first_rain_at']}"
+        text = f"{fmt(p['mm_max'])} mm/u regen verwacht om {p['first_rain_at']}"
         return html, text
 
     return "Voorlopig droog", "Voorlopig droog"
@@ -223,11 +223,12 @@ class BasePlugin:
             current_rate, current_total = 0.0, 0.0
 
         interval_hours = self._interval / 60
-        new_rate  = p["mm_now"]
+        # Domoticz Rain stores the rate as hundredths of mm/hour.
+        new_rate  = round(p["mm_now"] * 100)
         new_total = current_total + p["rain_now_avg"] * interval_hours
 
-        new_svalue     = f"{new_rate:.2f};{new_total:.2f}"
-        current_svalue = f"{current_rate:.2f};{current_total:.2f}"
+        new_svalue     = f"{new_rate:.0f};{new_total:.2f}"
+        current_svalue = f"{current_rate:.0f};{current_total:.2f}"
 
         if new_svalue != current_svalue:
             rain_dev.Update(nValue=0, sValue=new_svalue)
