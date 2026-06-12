@@ -1,8 +1,8 @@
 """
-<plugin key="RainForecast" name="Rain Forecast" author="MadPatrick" version="1.0.1" externallink="https://buienradar.nl" wikilink="https://github.com/MadPatrick/domoticz_rainforecast">
+<plugin key="RainForecast" name="Rain Forecast" author="MadPatrick" version="1.0.2" externallink="https://buienradar.nl" wikilink="https://github.com/MadPatrick/domoticz_rainforecast">
     <description>
         <h2>Buienradar</h2>
-        <p>Version 1.0.1</p>
+        <p>Version 1.0.2</p>
         Haalt de komende neerslagverwachting op via Buienradar en werkt
         twee devices bij: een Regen-sensor en een Tekst-device.
     </description>
@@ -33,6 +33,7 @@ from typing import Optional
 BUIENRADAR_URL = "https://gpsgadget.buienradar.nl/data/raintext?lat={lat}&lon={lon}"
 UNIT_RAIN = 1   # Regen-device (Neerslag)
 UNIT_TEXT = 2   # Tekst-device (Buienradar)
+RAIN_STEP_MINUTES = 5
 
 # ---------------------------------------------------------------------------
 # Hulpfuncties
@@ -57,10 +58,32 @@ def build_status(prefix: str, mm_now: float, mm_max: Optional[float]):
         text = f"{prefix} {fmt(mm_now)} mm/u"
     return html, text
 
+def rain_amount_for_interval(rain_values, interval_minutes: int) -> float:
+    """Bereken de verwachte hoeveelheid neerslag voor het poll-interval."""
+    if not rain_values or interval_minutes <= 0:
+        return 0.0
+
+    remaining = float(interval_minutes)
+    amount = 0.0
+    previous_mm = rain_values[0]
+
+    for current_mm in rain_values[1:]:
+        if remaining <= 0:
+            break
+        segment_minutes = min(RAIN_STEP_MINUTES, remaining)
+        amount += ((previous_mm + current_mm) / 2) * (segment_minutes / 60)
+        remaining -= segment_minutes
+        previous_mm = current_mm
+
+    if remaining > 0:
+        amount += previous_mm * (remaining / 60)
+
+    return amount
+
 def parse_buienradar(data: str):
     counter       = 0
     max_now_raw   = 0
-    rain_now_sum  = 0.0
+    rain_values   = []
     max_soon_raw  = 0
     first_rain_at = ""
     max_raw       = 0
@@ -75,12 +98,12 @@ def parse_buienradar(data: str):
         except ValueError:
             continue
         time_str = parts[1].strip() if len(parts) > 1 else ""
+        mm = raw_to_mm(raw)
+        rain_values.append(mm)
 
         if counter <= 1:
             if raw > max_now_raw:
                 max_now_raw = raw
-            if raw > 0:
-                rain_now_sum += raw_to_mm(raw)
         if counter <= 3 and raw > max_soon_raw:
             max_soon_raw = raw
         if first_rain_at == "" and raw > 0:
@@ -94,7 +117,7 @@ def parse_buienradar(data: str):
         "mm_now":        raw_to_mm(max_now_raw),
         "mm_soon":       raw_to_mm(max_soon_raw),
         "mm_max":        raw_to_mm(max_raw),
-        "rain_now_avg":  rain_now_sum / 2,
+        "rain_values":   rain_values,
         "max_now_raw":   max_now_raw,
         "max_soon_raw":  max_soon_raw,
         "max_raw":       max_raw,
@@ -224,10 +247,15 @@ class BasePlugin:
         except ValueError:
             current_rate, current_total = 0.0, 0.0
 
-        interval_hours = self._interval / 60
         # Domoticz Rain stores the rate as hundredths of mm/hour.
-        new_rate  = round(p["mm_now"] * 100)
-        new_total = current_total + p["rain_now_avg"] * interval_hours
+        rain_increment = rain_amount_for_interval(p["rain_values"], self._interval)
+        new_rate       = round(p["mm_now"] * 100)
+        new_total      = current_total + rain_increment
+
+        if self._debug:
+            Domoticz.Debug(f"Rain calc: now={fmt(p['mm_now'])} mm/u, "
+                           f"interval={self._interval} min, "
+                           f"add={rain_increment:.3f} mm, total={new_total:.2f} mm")
 
         new_svalue     = f"{new_rate:.0f};{new_total:.2f}"
         current_svalue = f"{current_rate:.0f};{current_total:.2f}"

@@ -28,7 +28,11 @@ Depending on the data, the text device may show messages such as:
 The Rain device is also updated with:
 
 - the current rain intensity in mm/hour;
-- the accumulated rain total based on the configured poll interval.
+- the accumulated rain estimate based on the configured poll interval.
+
+The accumulated rain total is calculated from the Buienradar rain forecast feed
+while the plugin is running. It is not the same as the measured daily total that
+Buienradar may show on the website for "today".
 
 ## Installation
 
@@ -96,7 +100,9 @@ You do not need to create these devices manually.
 3. A first measurement is performed immediately on startup.
 4. After that, the plugin periodically retrieves new data from Buienradar.
 5. The raw Buienradar values are converted to mm/hour.
-6. The Domoticz devices are only updated when the value or text changes.
+6. The plugin integrates the 5-minute forecast values over the configured poll
+   interval to estimate the amount of rain since the previous poll.
+7. The Domoticz devices are only updated when the value or text changes.
 
 The plugin retrieves data in a background thread, so the Domoticz main loop
 remains available while the Buienradar feed is queried.
@@ -126,6 +132,13 @@ https://gpsgadget.buienradar.nl/data/raintext?lat=<lat>&lon=<lon>
 
 This usually means that Buienradar does not forecast rain for the configured
 location. Check the coordinates if this is unexpected.
+
+### The Rain total differs from Buienradar today
+
+The Rain device total is built from the short-term `raintext` forecast and only
+counts while the plugin is running. Buienradar's website can show a measured
+daily total, so both values can differ after missed polls, restarts, forecast
+changes, or local differences between forecast and measurement.
 
 ## Updating
 
