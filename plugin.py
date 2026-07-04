@@ -1,10 +1,10 @@
 """
-<plugin key="RainForecast" name="Rain Forecast" author="MadPatrick" version="1.0.3" externallink="https://buienradar.nl" wikilink="https://github.com/MadPatrick/domoticz_rainforecast">
+<plugin key="RainForecast" name="Rain Forecast" author="MadPatrick" version="1.0.4" externallink="https://buienradar.nl" wikilink="https://github.com/MadPatrick/domoticz_rainforecast">
     <description>
         <h2>Buienradar</h2>
-        <p>Version 1.0.3</p>
+        <p>Version 1.0.4</p>
         Retrieves the upcoming rainfall forecast from Buienradar and updates
-        two devices: a Rain sensor and a Text device.
+        Three devices: a Rain sensor, a Text device and a temperature device.
     </description>
     <params>
         <param field="Mode1" label="Latitude (lat)"  width="80px" default=""/>
@@ -28,6 +28,7 @@
 
 import Domoticz
 import re
+import json
 import urllib.request
 import urllib.error
 import threading
@@ -37,8 +38,10 @@ from typing import Optional, Tuple
 # Constants
 # ---------------------------------------------------------------------------
 BUIENRADAR_URL = "https://gpsgadget.buienradar.nl/data/raintext?lat={lat}&lon={lon}"
+BUIENRADAR_JSON_URL = "https://data.buienradar.nl/2.0/feed/json"
 UNIT_RAIN = 1   # Rain device
 UNIT_TEXT = 2   # Text device
+UNIT_TEMP = 3   # Temperature device
 RAIN_STEP_MINUTES = 5
 LANGUAGE_TEXTS = {
     "EN": {
@@ -160,6 +163,30 @@ def parse_buienradar(data: str):
         "first_rain_at": first_rain_at,
     }
 
+def find_nearest_station_temperature(json_data: dict, lat: float, lon: float) -> Optional[float]:
+    """Zoekt het dichtstbijzijnde Buienradar-weerstation en geeft de temperatuur terug."""
+    stations = json_data.get("actual", {}).get("stationmeasurements", [])
+    if not stations:
+        return None
+
+    nearest_temp = None
+    nearest_dist = None
+
+    for station in stations:
+        try:
+            s_lat = float(station["lat"])
+            s_lon = float(station["lon"])
+            temp = float(station["temperature"])
+        except (KeyError, TypeError, ValueError):
+            continue
+
+        dist = (s_lat - lat) ** 2 + (s_lon - lon) ** 2
+        if nearest_dist is None or dist < nearest_dist:
+            nearest_dist = dist
+            nearest_temp = temp
+
+    return nearest_temp
+
 def build_status_text(p: dict, language: str):
     texts = LANGUAGE_TEXTS.get(language, LANGUAGE_TEXTS["NL"])
 
@@ -238,6 +265,11 @@ class BasePlugin:
             Domoticz.Device(Name="Rain forecast", Unit=UNIT_TEXT,
                             Type=243, Subtype=19, Used=1).Create()
             Domoticz.Log("Device 'Rain forecast' created")
+
+        if UNIT_TEMP not in Devices:
+            Domoticz.Device(Name="Temperature", Unit=UNIT_TEMP,
+                            TypeName="Temperature", Used=1).Create()
+            Domoticz.Log("Device 'Temperature' created")
 
         Domoticz.Log(f"Plugin started - version {self._plugin_version()}")
         Domoticz.Log(f"lat={self._lat}, lon={self._lon} ({self._location_source_summary()})")
@@ -327,6 +359,39 @@ class BasePlugin:
         with self._lock:
             self._process(data)
 
+        self._fetch_and_update_temperature()
+
+    def _fetch_and_update_temperature(self):
+        try:
+            with urllib.request.urlopen(BUIENRADAR_JSON_URL, timeout=10) as resp:
+                raw = resp.read().decode("utf-8", errors="replace")
+        except urllib.error.HTTPError as e:
+            Domoticz.Error(f"Buienradar temperature HTTP error (status code: {e.code})")
+            return
+        except Exception as e:
+            Domoticz.Error(f"Buienradar temperature connection error: {e}")
+            return
+
+        try:
+            json_data = json.loads(raw)
+        except ValueError:
+            Domoticz.Error("Unexpected format in Buienradar temperature response")
+            return
+
+        try:
+            lat = float(self._lat)
+            lon = float(self._lon)
+        except (TypeError, ValueError):
+            return
+
+        temperature = find_nearest_station_temperature(json_data, lat, lon)
+        if temperature is None:
+            Domoticz.Error("Could not determine temperature from Buienradar response")
+            return
+
+        with self._lock:
+            self._process_temperature(temperature)
+
     def _process(self, data: str):
         p = parse_buienradar(data)
         status_html, status_log = build_status_text(p, self._language)
@@ -361,6 +426,14 @@ class BasePlugin:
         if text_dev.sValue != status_html:
             Domoticz.Log(status_log)
             text_dev.Update(nValue=0, sValue=status_html)
+
+    def _process_temperature(self, temperature: float):
+        temp_dev = Devices[UNIT_TEMP]
+        new_svalue = fmt(temperature, 1)
+        if temp_dev.sValue != new_svalue:
+            temp_dev.Update(nValue=0, sValue=new_svalue)
+            if self._debug:
+                Domoticz.Debug(f"Temperature updated: {new_svalue} C")
 
 # ---------------------------------------------------------------------------
 # Domoticz plugin API hooks (module-level functions required)
