@@ -68,8 +68,8 @@ When adding the plugin, the following fields can be configured:
 
 | Field | Description | Default |
 | --- | --- | --- |
-| Latitude (lat) | Optional override for the latitude. Leave empty to use the Domoticz system location. The value is rounded to 2 decimals. | empty |
-| Longitude (lon) | Optional override for the longitude. Leave empty to use the Domoticz system location. The value is rounded to 2 decimals. | empty |
+| Latitude (lat) | Optional override for the latitude. Leave empty to use the Domoticz system location for this field. The value is rounded to 2 decimals. | empty |
+| Longitude (lon) | Optional override for the longitude. Leave empty to use the Domoticz system location for this field. The value is rounded to 2 decimals. | empty |
 | Poll interval (min) | How often the plugin should query Buienradar. | `5` |
 | Debug | Enables additional Domoticz debug logging. | `No` |
 

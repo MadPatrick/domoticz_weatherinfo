@@ -232,12 +232,6 @@ class BasePlugin:
         self._lat = manual_lat or domoticz_lat
         self._lon = manual_lon or domoticz_lon
 
-        if not manual_lat and not manual_lon and not (domoticz_lat and domoticz_lon):
-            Domoticz.Error(
-                "Geen geldige locatie gevonden. Vul lat/lon in of stel de Domoticz-locatie in."
-            )
-            return False
-
         if not self._lat or not self._lon:
             Domoticz.Error(
                 "Geen geldige locatie gevonden. Controleer lat/lon in Domoticz of de plugin."
