@@ -7,6 +7,8 @@
         twee devices bij: een Regen-sensor en een Tekst-device.
     </description>
     <params>
+        <param field="Mode1" label="Breedtegraad (lat)"  width="80px" default=""/>
+        <param field="Mode2" label="Lengtegraad (lon)"   width="80px" default=""/>
         <param field="Mode3" label="Poll-interval (min)" width="80px"  required="true" default="5"/>
         <param field="Mode6" label="Debug" width="75px">
             <options>
@@ -45,6 +47,16 @@ def raw_to_mm(raw: float) -> float:
 
 def fmt(value: float, decimals: int = 1) -> str:
     return f"{value:.{decimals}f}"
+
+def normalize_coordinate(value: str) -> Optional[str]:
+    value = (value or "").strip().replace(",", ".")
+    if not value:
+        return None
+
+    try:
+        return f"{float(value):.2f}"
+    except ValueError:
+        return None
 
 def build_status(prefix: str, mm_now: float, mm_max: Optional[float]):
     if mm_max is not None and mm_max > mm_now:
@@ -164,20 +176,9 @@ class BasePlugin:
         if self._debug:
             Domoticz.Debugging(1)
 
-        try:
-            location = Settings["Location"].strip()
-            self._lat, self._lon = [x.strip() for x in location.split(";", 1)]
-        except Exception:
-            Domoticz.Error(
-                "Locatie niet ingesteld in Domoticz (Instellingen -> Systeem -> Locatie)."
-            )
+        if not self._resolve_location():
             return
 
-        Domoticz.Log(f"Locatie uit Domoticz: lat={self._lat}, lon={self._lon}")
-
-        if not self._lat or not self._lon:
-            Domoticz.Error("Locatie niet ingesteld in Domoticz (Instellingen -> Systeem -> Latitude/Longitude).")
-            return
         try:
             self._interval = max(1, int(Parameters["Mode3"]))
         except ValueError:
@@ -211,6 +212,54 @@ class BasePlugin:
         if self._ticks >= ticks_needed:
             self._ticks = 0
             self._fetch_async()
+
+    def _resolve_location(self) -> bool:
+        manual_lat_raw = Parameters.get("Mode1", "")
+        manual_lon_raw = Parameters.get("Mode2", "")
+        manual_lat = normalize_coordinate(manual_lat_raw)
+        manual_lon = normalize_coordinate(manual_lon_raw)
+
+        if manual_lat_raw.strip() and manual_lat is None:
+            Domoticz.Error("Ongeldige Breedtegraad (lat) in hardware instellingen.")
+            return False
+        if manual_lon_raw.strip() and manual_lon is None:
+            Domoticz.Error("Ongeldige Lengtegraad (lon) in hardware instellingen.")
+            return False
+
+        domoticz_lat, domoticz_lon = self._read_domoticz_location()
+        self._lat = manual_lat or domoticz_lat or self._lat
+        self._lon = manual_lon or domoticz_lon or self._lon
+
+        if not manual_lat and not manual_lon and not (domoticz_lat and domoticz_lon):
+            Domoticz.Error(
+                "Geen geldige locatie gevonden. Vul lat/lon in of stel de Domoticz-locatie in."
+            )
+            return False
+
+        if not self._lat or not self._lon:
+            Domoticz.Error(
+                "Geen geldige locatie gevonden. Controleer lat/lon in Domoticz of de plugin."
+            )
+            return False
+
+        Domoticz.Log(f"Locatie actief: lat={self._lat}, lon={self._lon}")
+        return True
+
+    def _read_domoticz_location(self):
+        try:
+            location = Settings["Location"].strip()
+        except Exception:
+            return None, None
+
+        parts = [x.strip() for x in location.split(";", 1)]
+        if len(parts) != 2:
+            return None, None
+
+        lat = normalize_coordinate(parts[0])
+        lon = normalize_coordinate(parts[1])
+        if lat and lon:
+            Domoticz.Log(f"Locatie uit Domoticz: lat={lat}, lon={lon}")
+        return lat, lon
 
     # ------------------------------------------------------------------
     # Ophalen & verwerken
