@@ -49,7 +49,7 @@ def fmt(value: float, decimals: int = 1) -> str:
     return f"{value:.{decimals}f}"
 
 def normalize_coordinate(value: Optional[str]) -> Optional[str]:
-    """Strip spaties, vervang komma's en rond een coördinaat af naar 2 decimalen."""
+    """Strip spaties, vervang komma's en rond een coordinaat af naar 2 decimalen."""
     value = (value or "").strip().replace(",", ".")
     if not value:
         return None
@@ -60,7 +60,7 @@ def normalize_coordinate(value: Optional[str]) -> Optional[str]:
         return None
 
 def parse_manual_coordinate(value: Optional[str], label: str) -> Tuple[Optional[str], Optional[str]]:
-    """Valideer een handmatige coördinaat en geef een foutmelding terug indien ongeldig."""
+    """Valideer een handmatige coordinaat en geef een foutmelding terug indien ongeldig."""
     normalized = normalize_coordinate(value)
     if (value or "").strip() and normalized is None:
         return None, f"Ongeldige {label} in hardware instellingen."
