@@ -40,7 +40,6 @@ RAIN_STEP_MINUTES = 5
 # ---------------------------------------------------------------------------
 
 def raw_to_mm(raw: float) -> float:
-    """Ruwe Buienradar-waarde omrekenen naar mm/uur."""
     if raw == 0:
         return 0.0
     return 10 ** ((raw - 109) / 32)
@@ -49,7 +48,6 @@ def fmt(value: float, decimals: int = 1) -> str:
     return f"{value:.{decimals}f}"
 
 def normalize_coordinate(value: Optional[str]) -> Optional[str]:
-    """Strip spaties, vervang komma's en rond een coordinaat af naar 2 decimalen."""
     value = (value or "").strip().replace(",", ".")
     if not value:
         return None
@@ -60,7 +58,6 @@ def normalize_coordinate(value: Optional[str]) -> Optional[str]:
         return None
 
 def parse_manual_coordinate(value: Optional[str], label: str) -> Tuple[Optional[str], Optional[str]]:
-    """Valideer een handmatige coordinaat en geef een foutmelding terug indien ongeldig."""
     normalized = normalize_coordinate(value)
     if (value or "").strip() and normalized is None:
         return None, f"Ongeldige {label} in hardware instellingen."
@@ -77,7 +74,6 @@ def build_status(prefix: str, mm_now: float, mm_max: Optional[float]):
     return html, text
 
 def rain_amount_for_interval(rain_values, interval_minutes: int) -> float:
-    """Bereken de verwachte hoeveelheid neerslag voor het poll-interval."""
     if not rain_values or interval_minutes <= 0:
         return 0.0
 
@@ -143,7 +139,6 @@ def parse_buienradar(data: str):
     }
 
 def build_status_text(p: dict):
-    """Bouwt de HTML- en logtekst op uit de geparseerde data."""
     if p["max_now_raw"] > 0:
         mm_max_arg = p["mm_max"] if p["mm_max"] > p["mm_now"] else None
         return build_status("Het regent nu", p["mm_now"], mm_max_arg)
@@ -222,7 +217,6 @@ class BasePlugin:
             self._fetch_async()
 
     def _resolve_location(self) -> bool:
-        """Bepaal lat/lon waarbij handmatige overrides voorrang hebben op Domoticz."""
         manual_lat_raw = Parameters.get("Mode1", "")
         manual_lon_raw = Parameters.get("Mode2", "")
         manual_lat, lat_error = parse_manual_coordinate(manual_lat_raw, "Breedtegraad (lat)")
@@ -249,7 +243,6 @@ class BasePlugin:
         return True
 
     def _read_domoticz_location(self) -> Tuple[Optional[str], Optional[str]]:
-        """Lees en normaliseer lat/lon uit de Domoticz-systeemlocatie."""
         try:
             location = Settings["Location"].strip()
         except (KeyError, TypeError, AttributeError):
@@ -270,7 +263,6 @@ class BasePlugin:
     # ------------------------------------------------------------------
 
     def _fetch_async(self):
-        """Start een achtergrond-thread zodat de Domoticz-hoofdloop vrij blijft."""
         t = threading.Thread(target=self._fetch_and_update, daemon=True)
         t.start()
 
