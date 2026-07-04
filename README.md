@@ -39,7 +39,7 @@ Buienradar may show on the website for "today".
 Go to the Domoticz plugin directory:
 
 ```bash
-cd /home/pi/domoticz/plugins
+cd /home/domoticz/plugins
 ```
 
 Clone this repository:
@@ -145,7 +145,7 @@ changes, or local differences between forecast and measurement.
 Go to the plugin directory and pull the latest version:
 
 ```bash
-cd /home/pi/domoticz/plugins/Rain_Forecast
+cd /home/domoticz/plugins/Rain_Forecast
 git pull
 sudo systemctl restart domoticz
 ```
