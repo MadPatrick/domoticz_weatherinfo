@@ -10,6 +10,12 @@
         <param field="Mode1" label="Latitude (lat)"  width="80px" default=""/>
         <param field="Mode2" label="Longitude (lon)"   width="80px" default=""/>
         <param field="Mode3" label="Poll-interval (min)" width="80px"  required="true" default="5"/>
+        <param field="Mode4" label="Language" width="75px">
+            <options>
+                <option label="Nederlands" value="NL" default="true"/>
+                <option label="English" value="EN"/>
+            </options>
+        </param>
         <param field="Mode6" label="Debug" width="75px">
             <options>
                 <option label="Yes" value="Debug"/>
@@ -34,6 +40,22 @@ BUIENRADAR_URL = "https://gpsgadget.buienradar.nl/data/raintext?lat={lat}&lon={l
 UNIT_RAIN = 1   # Rain device
 UNIT_TEXT = 2   # Text device
 RAIN_STEP_MINUTES = 5
+LANGUAGE_TEXTS = {
+    "EN": {
+        "raining_now": "Raining now",
+        "rain_expected": "Rain expected",
+        "rain_expected_at": "rain expected at",
+        "dry_for_now": "Dry for now",
+        "range_word": "to",
+    },
+    "NL": {
+        "raining_now": "Het regent nu",
+        "rain_expected": "Regen verwacht",
+        "rain_expected_at": "regen verwacht om",
+        "dry_for_now": "Voorlopig droog",
+        "range_word": "tot",
+    },
+}
 
 # ---------------------------------------------------------------------------
 # Helper functions
@@ -63,11 +85,11 @@ def parse_manual_coordinate(value: Optional[str], label: str) -> Tuple[Optional[
         return None, f"Invalid {label} in hardware settings."
     return normalized, None
 
-def build_status(prefix: str, mm_now: float, mm_max: Optional[float]):
+def build_status(prefix: str, mm_now: float, mm_max: Optional[float], range_word: str):
     if mm_max is not None and mm_max > mm_now:
-        html = (f"{prefix} <font color='yellow'>{fmt(mm_now)}</font> tot "
+        html = (f"{prefix} <font color='yellow'>{fmt(mm_now)}</font> {range_word} "
                 f"<font color='yellow'>{fmt(mm_max)} mm/u</font>")
-        text = f"{prefix} {fmt(mm_now)} tot {fmt(mm_max)} mm/u"
+        text = f"{prefix} {fmt(mm_now)} {range_word} {fmt(mm_max)} mm/u"
     else:
         html = f"{prefix} <font color='yellow'>{fmt(mm_now)} mm/u</font>"
         text = f"{prefix} {fmt(mm_now)} mm/u"
@@ -138,22 +160,24 @@ def parse_buienradar(data: str):
         "first_rain_at": first_rain_at,
     }
 
-def build_status_text(p: dict):
+def build_status_text(p: dict, language: str):
+    texts = LANGUAGE_TEXTS.get(language, LANGUAGE_TEXTS["NL"])
+
     if p["max_now_raw"] > 0:
         mm_max_arg = p["mm_max"] if p["mm_max"] > p["mm_now"] else None
-        return build_status("Raining now", p["mm_now"], mm_max_arg)
+        return build_status(texts["raining_now"], p["mm_now"], mm_max_arg, texts["range_word"])
 
     if p["max_soon_raw"] > 0:
         mm_max_arg = p["mm_max"] if p["mm_max"] > p["mm_soon"] else None
-        return build_status("Rain expected", p["mm_soon"], mm_max_arg)
+        return build_status(texts["rain_expected"], p["mm_soon"], mm_max_arg, texts["range_word"])
 
     if p["first_rain_at"]:
-        html = (f"<font color='yellow'>{fmt(p['mm_max'])} mm/u</font> rain expected at "
+        html = (f"<font color='yellow'>{fmt(p['mm_max'])} mm/u</font> {texts['rain_expected_at']} "
                 f"<font color='yellow'>{p['first_rain_at']}</font>")
-        text = f"{fmt(p['mm_max'])} mm/u rain expected at {p['first_rain_at']}"
+        text = f"{fmt(p['mm_max'])} mm/u {texts['rain_expected_at']} {p['first_rain_at']}"
         return html, text
 
-    return "Dry for now", "Dry for now"
+    return texts["dry_for_now"], texts["dry_for_now"]
 
 # ---------------------------------------------------------------------------
 # Plugin-klasse
@@ -169,6 +193,7 @@ class BasePlugin:
         self._ticks     = 0         # heartbeat counter
         self._lat_source = "Domoticz"
         self._lon_source = "Domoticz"
+        self._language  = "NL"
         self._debug     = False
         self._lock      = threading.Lock()
 
@@ -187,6 +212,9 @@ class BasePlugin:
 
     def onStart(self):
         self._debug = (Parameters["Mode6"] == "Debug")
+        self._language = Parameters.get("Mode4", "NL")
+        if self._language not in LANGUAGE_TEXTS:
+            self._language = "NL"
         if self._debug:
             Domoticz.Debugging(1)
 
@@ -301,7 +329,7 @@ class BasePlugin:
 
     def _process(self, data: str):
         p = parse_buienradar(data)
-        status_html, status_log = build_status_text(p)
+        status_html, status_log = build_status_text(p, self._language)
 
         # --- update rain device ---
         rain_dev = Devices[UNIT_RAIN]
