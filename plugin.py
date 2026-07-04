@@ -3,11 +3,19 @@
     <description>
         <h2>Buienradar</h2>
         <p>Version 1.0.3</p>
-        Haalt de komende neerslagverwachting op via Buienradar en werkt
-        twee devices bij: een Regen-sensor en een Tekst-device.
+        Retrieves the upcoming rainfall forecast from Buienradar and updates
+        two devices: a Rain sensor and a Text device.
     </description>
     <params>
+        <param field="Mode1" label="Latitude (lat)"  width="80px" default=""/>
+        <param field="Mode2" label="Longitude (lon)"   width="80px" default=""/>
         <param field="Mode3" label="Poll-interval (min)" width="80px"  required="true" default="5"/>
+        <param field="Mode4" label="Language" width="75px">
+            <options>
+                <option label="NL" value="NL" default="true"/>
+                <option label="EN" value="EN"/>
+            </options>
+        </param>
         <param field="Mode6" label="Debug" width="75px">
             <options>
                 <option label="Yes" value="Debug"/>
@@ -23,22 +31,37 @@ import re
 import urllib.request
 import urllib.error
 import threading
-from typing import Optional
+from typing import Optional, Tuple
 
 # ---------------------------------------------------------------------------
-# Constanten
+# Constants
 # ---------------------------------------------------------------------------
 BUIENRADAR_URL = "https://gpsgadget.buienradar.nl/data/raintext?lat={lat}&lon={lon}"
-UNIT_RAIN = 1   # Regen-device (Neerslag)
-UNIT_TEXT = 2   # Tekst-device (Buienradar)
+UNIT_RAIN = 1   # Rain device
+UNIT_TEXT = 2   # Text device
 RAIN_STEP_MINUTES = 5
+LANGUAGE_TEXTS = {
+    "EN": {
+        "raining_now": "Raining now",
+        "rain_expected": "Rain expected",
+        "rain_expected_at": "rain expected at",
+        "dry_for_now": "Dry for now",
+        "range_word": "to",
+    },
+    "NL": {
+        "raining_now": "Het regent nu",
+        "rain_expected": "Regen verwacht",
+        "rain_expected_at": "regen verwacht om",
+        "dry_for_now": "Voorlopig droog",
+        "range_word": "tot",
+    },
+}
 
 # ---------------------------------------------------------------------------
-# Hulpfuncties
+# Helper functions
 # ---------------------------------------------------------------------------
 
 def raw_to_mm(raw: float) -> float:
-    """Ruwe Buienradar-waarde omrekenen naar mm/uur."""
     if raw == 0:
         return 0.0
     return 10 ** ((raw - 109) / 32)
@@ -46,18 +69,33 @@ def raw_to_mm(raw: float) -> float:
 def fmt(value: float, decimals: int = 1) -> str:
     return f"{value:.{decimals}f}"
 
-def build_status(prefix: str, mm_now: float, mm_max: Optional[float]):
+def normalize_coordinate(value: Optional[str]) -> Optional[str]:
+    value = (value or "").strip().replace(",", ".")
+    if not value:
+        return None
+
+    try:
+        return f"{float(value):.2f}"
+    except ValueError:
+        return None
+
+def parse_manual_coordinate(value: Optional[str], label: str) -> Tuple[Optional[str], Optional[str]]:
+    normalized = normalize_coordinate(value)
+    if (value or "").strip() and normalized is None:
+        return None, f"Invalid {label} in hardware settings."
+    return normalized, None
+
+def build_status(prefix: str, mm_now: float, mm_max: Optional[float], range_word: str):
     if mm_max is not None and mm_max > mm_now:
-        html = (f"{prefix} <font color='yellow'>{fmt(mm_now)}</font> tot "
+        html = (f"{prefix} <font color='yellow'>{fmt(mm_now)}</font> {range_word} "
                 f"<font color='yellow'>{fmt(mm_max)} mm/u</font>")
-        text = f"{prefix} {fmt(mm_now)} tot {fmt(mm_max)} mm/u"
+        text = f"{prefix} {fmt(mm_now)} {range_word} {fmt(mm_max)} mm/u"
     else:
         html = f"{prefix} <font color='yellow'>{fmt(mm_now)} mm/u</font>"
         text = f"{prefix} {fmt(mm_now)} mm/u"
     return html, text
 
 def rain_amount_for_interval(rain_values, interval_minutes: int) -> float:
-    """Bereken de verwachte hoeveelheid neerslag voor het poll-interval."""
     if not rain_values or interval_minutes <= 0:
         return 0.0
 
@@ -122,23 +160,24 @@ def parse_buienradar(data: str):
         "first_rain_at": first_rain_at,
     }
 
-def build_status_text(p: dict):
-    """Bouwt de HTML- en logtekst op uit de geparseerde data."""
+def build_status_text(p: dict, language: str):
+    texts = LANGUAGE_TEXTS.get(language, LANGUAGE_TEXTS["NL"])
+
     if p["max_now_raw"] > 0:
         mm_max_arg = p["mm_max"] if p["mm_max"] > p["mm_now"] else None
-        return build_status("Het regent nu", p["mm_now"], mm_max_arg)
+        return build_status(texts["raining_now"], p["mm_now"], mm_max_arg, texts["range_word"])
 
     if p["max_soon_raw"] > 0:
         mm_max_arg = p["mm_max"] if p["mm_max"] > p["mm_soon"] else None
-        return build_status("Regen verwacht", p["mm_soon"], mm_max_arg)
+        return build_status(texts["rain_expected"], p["mm_soon"], mm_max_arg, texts["range_word"])
 
     if p["first_rain_at"]:
-        html = (f"<font color='yellow'>{fmt(p['mm_max'])} mm/u</font> regen verwacht om "
+        html = (f"<font color='yellow'>{fmt(p['mm_max'])} mm/u</font> {texts['rain_expected_at']} "
                 f"<font color='yellow'>{p['first_rain_at']}</font>")
-        text = f"{fmt(p['mm_max'])} mm/u regen verwacht om {p['first_rain_at']}"
+        text = f"{fmt(p['mm_max'])} mm/u {texts['rain_expected_at']} {p['first_rain_at']}"
         return html, text
 
-    return "Voorlopig droog", "Voorlopig droog"
+    return texts["dry_for_now"], texts["dry_for_now"]
 
 # ---------------------------------------------------------------------------
 # Plugin-klasse
@@ -149,35 +188,39 @@ class BasePlugin:
     def __init__(self):
         self._lat       = "52.37"
         self._lon       = "4.90"
-        self._interval  = 10        # minuten
-        self._heartbeat = 30        # seconden (Domoticz heartbeat)
-        self._ticks     = 0         # telt heartbeats
+        self._interval  = 10        # minutes
+        self._heartbeat = 30        # seconds (Domoticz heartbeat)
+        self._ticks     = 0         # heartbeat counter
+        self._lat_source = "Domoticz"
+        self._lon_source = "Domoticz"
+        self._language  = "NL"
         self._debug     = False
         self._lock      = threading.Lock()
 
+    def _plugin_version(self) -> str:
+        match = re.search(r'version="([^"]+)"', __doc__ or "")
+        return match.group(1) if match else "unknown"
+
+    def _location_source_summary(self) -> str:
+        if self._lat_source == self._lon_source:
+            return self._lat_source
+        return f"lat={self._lat_source}, lon={self._lon_source}"
+
     # ------------------------------------------------------------------
-    # Levenscyclus
+    # Lifecycle
     # ------------------------------------------------------------------
 
     def onStart(self):
         self._debug = (Parameters["Mode6"] == "Debug")
+        self._language = Parameters.get("Mode4", "NL")
+        if self._language not in LANGUAGE_TEXTS:
+            self._language = "NL"
         if self._debug:
             Domoticz.Debugging(1)
 
-        try:
-            location = Settings["Location"].strip()
-            self._lat, self._lon = [x.strip() for x in location.split(";", 1)]
-        except Exception:
-            Domoticz.Error(
-                "Locatie niet ingesteld in Domoticz (Instellingen -> Systeem -> Locatie)."
-            )
+        if not self._resolve_location():
             return
 
-        Domoticz.Log(f"Locatie uit Domoticz: lat={self._lat}, lon={self._lon}")
-
-        if not self._lat or not self._lon:
-            Domoticz.Error("Locatie niet ingesteld in Domoticz (Instellingen -> Systeem -> Latitude/Longitude).")
-            return
         try:
             self._interval = max(1, int(Parameters["Mode3"]))
         except ValueError:
@@ -185,25 +228,25 @@ class BasePlugin:
 
         Domoticz.Heartbeat(self._heartbeat)
 
-        # Devices aanmaken indien nog niet aanwezig
+        # Create devices if they do not exist yet
         if UNIT_RAIN not in Devices:
-            Domoticz.Device(Name="Neerslag", Unit=UNIT_RAIN,
+            Domoticz.Device(Name="Rainfall", Unit=UNIT_RAIN,
                             TypeName="Rain", Used=1).Create()
-            Domoticz.Log("Device 'Neerslag' aangemaakt")
+            Domoticz.Log("Device 'Rainfall' created")
 
         if UNIT_TEXT not in Devices:
-            Domoticz.Device(Name="Buienradar", Unit=UNIT_TEXT,
+            Domoticz.Device(Name="Rain forecast", Unit=UNIT_TEXT,
                             Type=243, Subtype=19, Used=1).Create()
-            Domoticz.Log("Device 'Buienradar' aangemaakt")
+            Domoticz.Log("Device 'Rain forecast' created")
 
-        Domoticz.Log(f"Plugin gestart - lat={self._lat}, lon={self._lon}, "
-                     f"interval={self._interval} min")
+        Domoticz.Log(f"Plugin started - version {self._plugin_version()}")
+        Domoticz.Log(f"lat={self._lat}, lon={self._lon} ({self._location_source_summary()})")
 
-        # Direct eerste poll uitvoeren
+        # Run first poll immediately
         self._fetch_async()
 
     def onStop(self):
-        Domoticz.Log("Plugin gestopt")
+        Domoticz.Log("Plugin stopped")
 
     def onHeartbeat(self):
         self._ticks += 1
@@ -212,12 +255,52 @@ class BasePlugin:
             self._ticks = 0
             self._fetch_async()
 
+    def _resolve_location(self) -> bool:
+        manual_lat_raw = Parameters.get("Mode1", "")
+        manual_lon_raw = Parameters.get("Mode2", "")
+        manual_lat, lat_error = parse_manual_coordinate(manual_lat_raw, "latitude (lat)")
+        manual_lon, lon_error = parse_manual_coordinate(manual_lon_raw, "longitude (lon)")
+
+        if lat_error:
+            Domoticz.Error(lat_error)
+            return False
+        if lon_error:
+            Domoticz.Error(lon_error)
+            return False
+
+        domoticz_lat, domoticz_lon = self._read_domoticz_location()
+        self._lat = manual_lat or domoticz_lat
+        self._lon = manual_lon or domoticz_lon
+        self._lat_source = "manual" if manual_lat else "Domoticz"
+        self._lon_source = "manual" if manual_lon else "Domoticz"
+
+        if not self._lat or not self._lon:
+            Domoticz.Error(
+                "No valid location found. Check lat/lon in Domoticz or in the plugin settings."
+            )
+            return False
+
+        return True
+
+    def _read_domoticz_location(self) -> Tuple[Optional[str], Optional[str]]:
+        try:
+            location = Settings["Location"].strip()
+        except (KeyError, TypeError, AttributeError):
+            return None, None
+
+        parts = [x.strip() for x in location.split(";", 1)]
+        if len(parts) != 2:
+            return None, None
+
+        lat = normalize_coordinate(parts[0])
+        lon = normalize_coordinate(parts[1])
+        return lat, lon
+
     # ------------------------------------------------------------------
-    # Ophalen & verwerken
+    # Fetching & processing
     # ------------------------------------------------------------------
 
     def _fetch_async(self):
-        """Start een achtergrond-thread zodat de Domoticz-hoofdloop vrij blijft."""
         t = threading.Thread(target=self._fetch_and_update, daemon=True)
         t.start()
 
@@ -227,18 +310,18 @@ class BasePlugin:
             with urllib.request.urlopen(url, timeout=10) as resp:
                 data = resp.read().decode("utf-8", errors="replace")
         except urllib.error.HTTPError as e:
-            Domoticz.Error(f"HTTP-fout van Buienradar (statuscode: {e.code})")
+            Domoticz.Error(f"Buienradar HTTP error (status code: {e.code})")
             return
         except Exception as e:
-            Domoticz.Error(f"Verbindingsfout Buienradar: {e}")
+            Domoticz.Error(f"Buienradar connection error: {e}")
             return
 
         if not data or not data.strip():
-            Domoticz.Error("Lege response ontvangen van Buienradar")
+            Domoticz.Error("Received empty response from Buienradar")
             return
 
         if not re.search(r"\d+\|\d+:\d+", data):
-            Domoticz.Error("Onverwacht formaat in Buienradar response")
+            Domoticz.Error("Unexpected format in Buienradar response")
             return
 
         with self._lock:
@@ -246,9 +329,9 @@ class BasePlugin:
 
     def _process(self, data: str):
         p = parse_buienradar(data)
-        status_html, status_log = build_status_text(p)
+        status_html, status_log = build_status_text(p, self._language)
 
-        # --- regen-device bijwerken ---
+        # --- update rain device ---
         rain_dev = Devices[UNIT_RAIN]
         try:
             parts         = rain_dev.sValue.split(";") if rain_dev.sValue else []
@@ -273,14 +356,14 @@ class BasePlugin:
         if new_svalue != current_svalue:
             rain_dev.Update(nValue=0, sValue=new_svalue)
 
-        # --- Tekst-device bijwerken ---
+        # --- update text device ---
         text_dev = Devices[UNIT_TEXT]
         if text_dev.sValue != status_html:
             Domoticz.Log(status_log)
             text_dev.Update(nValue=0, sValue=status_html)
 
 # ---------------------------------------------------------------------------
-# Domoticz plugin-API hooks  (module-niveau functies vereist)
+# Domoticz plugin API hooks (module-level functions required)
 # ---------------------------------------------------------------------------
 
 _plugin = BasePlugin()
