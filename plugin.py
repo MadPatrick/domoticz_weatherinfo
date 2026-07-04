@@ -1,14 +1,12 @@
 """
-<plugin key="RainForecast" name="Rain Forecast" author="MadPatrick" version="1.0.2" externallink="https://buienradar.nl" wikilink="https://github.com/MadPatrick/domoticz_rainforecast">
+<plugin key="RainForecast" name="Rain Forecast" author="MadPatrick" version="1.0.3" externallink="https://buienradar.nl" wikilink="https://github.com/MadPatrick/domoticz_rainforecast">
     <description>
         <h2>Buienradar</h2>
-        <p>Version 1.0.2</p>
+        <p>Version 1.0.3</p>
         Haalt de komende neerslagverwachting op via Buienradar en werkt
         twee devices bij: een Regen-sensor en een Tekst-device.
     </description>
     <params>
-        <param field="Mode1" label="Breedtegraad (lat)"  width="80px"  required="true" default="52.37"/>
-        <param field="Mode2" label="Lengtegraad (lon)"   width="80px"  required="true" default="4.90"/>
         <param field="Mode3" label="Poll-interval (min)" width="80px"  required="true" default="5"/>
         <param field="Mode6" label="Debug" width="75px">
             <options>
@@ -166,8 +164,20 @@ class BasePlugin:
         if self._debug:
             Domoticz.Debugging(1)
 
-        self._lat = Parameters["Mode1"].strip() or "52.37"
-        self._lon = Parameters["Mode2"].strip() or "4.90"
+        try:
+            location = Settings["Location"].strip()
+            self._lat, self._lon = [x.strip() for x in location.split(";", 1)]
+        except Exception:
+            Domoticz.Error(
+                "Locatie niet ingesteld in Domoticz (Instellingen -> Systeem -> Locatie)."
+            )
+            return
+
+        Domoticz.Log(f"Locatie uit Domoticz: lat={self._lat}, lon={self._lon}")
+
+        if not self._lat or not self._lon:
+            Domoticz.Error("Locatie niet ingesteld in Domoticz (Instellingen -> Systeem -> Latitude/Longitude).")
+            return
         try:
             self._interval = max(1, int(Parameters["Mode3"]))
         except ValueError:
