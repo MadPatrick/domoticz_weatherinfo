@@ -7,8 +7,10 @@
         three devices: a Rain sensor, a Text device, and a Temperature device.
     </description>
     <params>
-        <param field="Mode1" label="Latitude (lat)"  width="80px" default=""/>
-        <param field="Mode2" label="Longitude (lon)"   width="80px" default=""/>
+        <param field="Mode1" label="Latitude (lat)"  width="80px" default="">
+            <description><br/>Leave LAT and LON blank for Domoticz settings<br/></description>
+        </param>
+        <param field="Mode2" label="Longitude (lon)" width="80px" default=""/>
         <param field="Mode3" label="Poll-interval (min)" width="80px"  required="true" default="5"/>
         <param field="Mode4" label="Language" width="75px">
             <options>
@@ -18,10 +20,10 @@
         </param>
         <param field="Mode5" label="Text device" width="220px">
             <options>
-                <option label="Status - temperatuur" value="temp"/>
-                <option label="Status - temperatuur - logo" value="temp_logo"/>
-                <option label="Status - temperatuur - logo - wind" value="temp_logo_wind"/>
-                <option label="Status - temperatuur - omschrijving - logo - wind" value="temp_desc_logo_wind" default="true"/>
+                <option label="Status - temperature" value="temp"/>
+                <option label="Status - temperature - logo" value="temp_logo"/>
+                <option label="Status - temperature - logo - wind" value="temp_logo_wind"/>
+                <option label="Status - temperature - description - logo - wind" value="temp_desc_logo_wind" default="true"/>
             </options>
         </param>
         <param field="Mode6" label="Debug" width="75px">
@@ -646,7 +648,7 @@ class BasePlugin:
         # --- update text device ---
         text_dev = Devices[UNIT_TEXT]
         if text_dev.sValue != status_html:
-            Domoticz.Log(status_log)
+        #    Domoticz.Log(status_log)
             text_dev.Update(nValue=0, sValue=status_html)
 
         if weather_info and weather_info.get("temperature") is not None:
