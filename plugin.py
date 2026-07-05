@@ -4,7 +4,7 @@
         <h2>Buienradar</h2>
         <p>Version 1.0.4</p>
         Retrieves the upcoming rainfall forecast from Buienradar and updates
-        Three devices: a Rain sensor, a Text device and a temperature device.
+        two devices: a Rain sensor and a Text device.
     </description>
     <params>
         <param field="Mode1" label="Latitude (lat)"  width="80px" default=""/>
