@@ -16,6 +16,14 @@
                 <option label="EN" value="EN"/>
             </options>
         </param>
+        <param field="Mode5" label="Text device" width="220px">
+            <options>
+                <option label="Status → temperatuur" value="temp"/>
+                <option label="Status → temperatuur → logo" value="temp_logo"/>
+                <option label="Status → temperatuur → logo → wind" value="temp_logo_wind"/>
+                <option label="Status → temperatuur → omschrijving → logo → wind" value="temp_desc_logo_wind" default="true"/>
+            </options>
+        </param>
         <param field="Mode6" label="Debug" width="75px">
             <options>
                 <option label="Yes" value="Debug"/>
@@ -59,6 +67,28 @@ LANGUAGE_TEXTS = {
         "rain_expected_at": "regen verwacht om",
         "dry_for_now": "Voorlopig droog",
         "range_word": "tot",
+    },
+}
+TEXT_DEVICE_MODES = {
+    "temp": {
+        "description": False,
+        "icon": False,
+        "wind": False,
+    },
+    "temp_logo": {
+        "description": False,
+        "icon": True,
+        "wind": False,
+    },
+    "temp_logo_wind": {
+        "description": False,
+        "icon": True,
+        "wind": True,
+    },
+    "temp_desc_logo_wind": {
+        "description": True,
+        "icon": True,
+        "wind": True,
     },
 }
 
@@ -305,10 +335,11 @@ def build_weather_icon_html(weather_info: Optional[dict]) -> str:
     return (f'<i class="fa {icon_class}" title="{alt}" '
             f'style="vertical-align: middle;"></i>')
 
-def build_weather_suffix(weather_info: Optional[dict]) -> Tuple[str, str]:
+def build_weather_suffix(weather_info: Optional[dict], text_mode: str) -> Tuple[str, str]:
     if not weather_info:
         return "", ""
 
+    mode = TEXT_DEVICE_MODES.get(text_mode, TEXT_DEVICE_MODES["temp_desc_logo_wind"])
     html_sections = []
     text_sections = []
 
@@ -330,15 +361,15 @@ def build_weather_suffix(weather_info: Optional[dict]) -> Tuple[str, str]:
     middle_html_parts = []
     middle_text_parts = []
 
-    if weatherdescription:
+    if mode["description"] and weatherdescription:
         middle_html_parts.append(html.escape(weatherdescription))
         middle_text_parts.append(weatherdescription)
 
-    if icon_html:
+    if mode["icon"] and icon_html:
         middle_html_parts.append(icon_html)
         # Geen tekst-equivalent voor het logo in de logregel.
 
-    if wind_text:
+    if mode["wind"] and wind_text:
         middle_html_parts.append(html.escape(wind_text))
         middle_text_parts.append(wind_text)
 
@@ -349,8 +380,8 @@ def build_weather_suffix(weather_info: Optional[dict]) -> Tuple[str, str]:
 
     return " - ".join(html_sections), " - ".join(text_sections)
 
-def append_weather_to_status(status_html: str, status_log: str, weather_info: Optional[dict]) -> Tuple[str, str]:
-    suffix_html, suffix_log = build_weather_suffix(weather_info)
+def append_weather_to_status(status_html: str, status_log: str, weather_info: Optional[dict], text_mode: str) -> Tuple[str, str]:
+    suffix_html, suffix_log = build_weather_suffix(weather_info, text_mode)
     if suffix_html:
         status_html = f"{status_html}&nbsp;&nbsp; - {suffix_html}"
     if suffix_log:
@@ -391,6 +422,7 @@ class BasePlugin:
         self._lat_source = "Domoticz"
         self._lon_source = "Domoticz"
         self._language  = "NL"
+        self._text_mode = "temp_desc_logo_wind"
         self._debug     = False
         self._lock      = threading.Lock()
         self._weather_info = None
@@ -413,6 +445,9 @@ class BasePlugin:
         self._language = Parameters.get("Mode4", "NL")
         if self._language not in LANGUAGE_TEXTS:
             self._language = "NL"
+        self._text_mode = Parameters.get("Mode5", "temp_desc_logo_wind")
+        if self._text_mode not in TEXT_DEVICE_MODES:
+            self._text_mode = "temp_desc_logo_wind"
         if self._debug:
             Domoticz.Debugging(1)
 
@@ -576,7 +611,12 @@ class BasePlugin:
     def _process(self, data: str, weather_info: Optional[dict]):
         p = parse_buienradar(data)
         status_html, status_log = build_status_text(p, self._language)
-        status_html, status_log = append_weather_to_status(status_html, status_log, weather_info)
+        status_html, status_log = append_weather_to_status(
+            status_html,
+            status_log,
+            weather_info,
+            self._text_mode
+        )
 
         # --- update rain device ---
         rain_dev = Devices[UNIT_RAIN]

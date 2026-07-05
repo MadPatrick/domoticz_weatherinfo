@@ -76,6 +76,7 @@ When adding the plugin, the following fields can be configured:
 | Longitude (lon) | Optional override for the longitude. Leave empty to use the Domoticz system location for this field. The value is rounded to 2 decimals. | empty |
 | Poll interval (min) | How often the plugin should query Buienradar. | `5` |
 | Language | Language for the rain forecast text. | `NL` |
+| Text device | Controls which weather parts are appended to the status text. Choices: `Status → temperatuur`, `Status → temperatuur → logo`, `Status → temperatuur → logo → wind`, `Status → temperatuur → omschrijving → logo → wind`. | `Status → temperatuur → omschrijving → logo → wind` |
 | Debug | Enables additional Domoticz debug logging. | `No` |
 
 Example for Amsterdam:
