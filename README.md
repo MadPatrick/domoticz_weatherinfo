@@ -1,168 +1,102 @@
 # Domoticz Rain Forecast
 
-Domoticz Rain Forecast is a Python plugin for Domoticz that retrieves the
-current rain forecast from Buienradar. The plugin automatically creates three
-devices:
+Deze plugin haalt neerslagverwachting op van Buienradar en toont die in Domoticz.
+This plugin retrieves rain forecast data from Buienradar and updates 3 devices.
 
-- **Neerslag**: a Domoticz Rain device with the current rain value and the
-  accumulated total.
-- **Buienradar**: a text device with a short, readable forecast, the current
-  Buienradar weather icon, temperature, weather description, wind direction,
-  and Beaufort wind force.
-- **Temperature**: a Domoticz Temperature device with the nearest Buienradar
-  station temperature.
+## Wat doet deze plugin / What does it do
 
-The plugin is intended for users who want to quickly see in Domoticz whether it
-is raining now, whether rain is expected soon, and roughly how much rain is
-forecast.
+De plugin leest de `raintext` feed op basis van latitude/longitude en vult ook
+weerinfo aan via de Buienradar JSON feed.
 
-## What does the plugin do?
+Je krijgt o.a.:
+- actuele regenintensiteit (`mm/u`)
+- geschatte neerslag over de ingestelde poll-interval
+- status tekst in NL of EN
+- optioneel temperatuur, icoon, omschrijving en wind in de tekst
 
-The plugin uses the Buienradar `raintext` feed based on your latitude and
-longitude. On each poll, it retrieves the forecast and converts it into a
-Domoticz status.
+Voorbeeld status (NL):
+- `Het regent nu 0.8 mm/u`
+- `Regen verwacht 1.2 mm/u`
+- `2.4 mm/u regen verwacht om 14:35`
+- `Voorlopig droog ...`
 
-Depending on the data, the text device may show messages such as:
+Example status (EN):
+- `Raining now 0.8 mm/u`
+- `Rain expected 1.2 mm/u`
+- `2.4 mm/u rain expected at 14:35`
+- `Dry for now ...`
 
-- `Het regent nu 0.8 mm`
-- `Regen verwacht 1.2 mm`
-- `2.4 mm regen verwacht om 14:35`
-- `Voorlopig droog <img src="..."> - 19,7Â°C - Zwaar bewolkt NW4`
-
-The Rain device is also updated with:
-
-- the current rain intensity in mm/hour;
-- the accumulated rain estimate based on the configured poll interval.
-
-The accumulated rain total is calculated from the Buienradar rain forecast feed
-while the plugin is running. It is not the same as the measured daily total that
-Buienradar may show on the website for "today".
-
-## Installation
-
-Go to the Domoticz plugin directory:
+## Installatie / Installation
 
 ```bash
 cd /home/domoticz/plugins
-```
-
-Clone this repository:
-
-```bash
 git clone https://github.com/MadPatrick/domoticz_rainforecast Rain_Forecast
-```
-
-Restart Domoticz after installing the plugin:
-
-```bash
 sudo systemctl restart domoticz
 ```
 
-Then open Domoticz and go to:
+Ga daarna naar / Then go to:
 
 ```text
 Setup -> Hardware
 ```
 
-Add a new hardware item with type **Rain Forecast**.
+Voeg hardware toe met type **Rain Forecast**.
 
-## Configuration
+## Configuratie / Configuration
 
-When adding the plugin, the following fields can be configured:
+Onderstaande labels zijn exact zoals in het script:
 
-| Field | Description | Default |
+| Field (script) | Uitleg / Description | Default |
 | --- | --- | --- |
-| Latitude (lat) | Optional override for the latitude. Leave empty to use the Domoticz system location for this field. The value is rounded to 2 decimals. | empty |
-| Longitude (lon) | Optional override for the longitude. Leave empty to use the Domoticz system location for this field. The value is rounded to 2 decimals. | empty |
-| Poll interval (min) | How often the plugin should query Buienradar. | `5` |
-| Language | Language for the rain forecast text. | `NL` |
-| Text device | Controls which weather parts are appended to the status text. Choices: `Status - temperatuur`, `Status - temperatuur - logo`, `Status - temperatuur - logo - wind`, `Status - temperatuur - omschrijving - logo - wind`. | `Status - temperatuur - omschrijving - logo - wind` |
-| Debug | Enables additional Domoticz debug logging. | `No` |
+| `Latitude (lat)` | Optionele override voor latitude. Leeg = Domoticz systeemlocatie. | empty |
+| `Longitude (lon)` | Optionele override voor longitude. Leeg = Domoticz systeemlocatie. | empty |
+| `Poll-interval (min)` | Hoe vaak de plugin Buienradar opvraagt / Poll frequency in minutes. | `5` |
+| `Language` | Taal voor statusbericht (`NL` of `EN`). | `NL` |
+| `Text device` | Welke onderdelen in de tekst komen. | `Status - temperature - description - logo - wind` |
+| `Debug` | Extra Domoticz debug logging (`Yes`/`No`). | `No` |
 
-Example for Amsterdam:
+`Text device` opties (exact script labels):
+- `Status - temperature`
+- `Status - temperature - logo`
+- `Status - temperature - logo - wind`
+- `Status - temperature - description - logo - wind`
 
-```text
-Latitude: 52.37
-Longitude: 4.90
-```
+## Devices die worden aangemaakt / Created devices
 
-## Created devices
+De plugin maakt automatisch deze devices aan (exact script names):
 
-After startup, the plugin automatically creates the following devices if they do
-not already exist:
+| Unit | Name (script) | Type |
+| --- | --- | --- |
+| `1` | `Rainfall` | `Rain` |
+| `2` | `Rain forecast` | `Text` |
+| `3` | `Temperature` | `Temperature` |
 
-| Unit | Device | Type | Purpose |
-| --- | --- | --- | --- |
-| 1 | Neerslag | Rain | Current rain and accumulated total |
-| 2 | Buienradar | Text | Readable rain forecast with weather icon, temperature, weather description, and wind |
-| 3 | Temperature | Temperature | Current temperature from the nearest Buienradar station |
+## Werking in het kort / How it works (short)
 
-You do not need to create these devices manually.
-
-## How it works
-
-1. Domoticz starts the plugin and reads the configured location and poll
-   interval.
-2. The plugin creates the required devices if they do not already exist.
-3. A first measurement is performed immediately on startup.
-4. After that, the plugin periodically retrieves new data from Buienradar.
-5. The Buienradar JSON feed is used for the nearest station weather icon,
-   temperature, weather description, wind direction, and Beaufort wind force,
-   with `fivedayforecast` as fallback for missing icon or description data.
-6. The raw Buienradar values are converted to mm/hour.
-7. The plugin integrates the 5-minute forecast values over the configured poll
-   interval to estimate the amount of rain since the previous poll.
-8. The Domoticz devices are only updated when the value or text changes.
-
-The plugin retrieves data in a background thread, so the Domoticz main loop
-remains available while the Buienradar feed is queried.
+1. Plugin start en leest configuratie.
+2. Devices worden aangemaakt als ze nog niet bestaan.
+3. Data wordt periodiek opgehaald van Buienradar.
+4. Rain raw values worden omgerekend naar `mm/u`.
+5. Regenhoeveelheid wordt geïntegreerd over de ingestelde poll-interval.
+6. Devices worden alleen geüpdatet als er echt iets verandert.
 
 ## Troubleshooting
 
-### The plugin does not appear in Domoticz
+### Plugin niet zichtbaar / Plugin not visible
+Controleer de mapnaam in `/home/domoticz/plugins` en herstart Domoticz.
 
-Check whether the repository is located in the correct plugin directory and
-restart Domoticz. The directory name may be `Rain_Forecast`, for example.
+### Geen data / No data
+Controleer internettoegang en coördinaten.
+Gebruikte rain URL:
+`https://gpsgadget.buienradar.nl/data/raintext?lat=<lat>&lon=<lon>`
 
-### No devices are created
+### Tekst blijft "Voorlopig droog" / Text stays "Dry for now"
+Meestal voorspelt Buienradar dan geen regen op die locatie.
 
-Check the Domoticz log. If needed, set **Debug** to `Yes` in the plugin
-configuration and restart the plugin.
-
-### No Buienradar data is received
-
-Check whether Domoticz has internet access and whether the configured
-coordinates are correct. The plugin uses this URL:
-
-```text
-https://gpsgadget.buienradar.nl/data/raintext?lat=<lat>&lon=<lon>
-```
-
-### The text stays on "Voorlopig droog"
-
-This usually means that Buienradar does not forecast rain for the configured
-location. Check the coordinates if this is unexpected.
-
-### The Rain total differs from Buienradar today
-
-The Rain device total is built from the short-term `raintext` forecast and only
-counts while the plugin is running. Buienradar's website can show a measured
-daily total, so both values can differ after missed polls, restarts, forecast
-changes, or local differences between forecast and measurement.
-
-## Updating
-
-Go to the plugin directory and pull the latest version:
+## Updaten / Updating
 
 ```bash
 cd /home/domoticz/plugins/Rain_Forecast
 git pull
 sudo systemctl restart domoticz
 ```
-
-## Requirements
-
-- Domoticz with Python plugin support.
-- Internet access from the machine running Domoticz.
-- No API key required; the plugin uses the public Buienradar raintext and JSON
-  feeds.
