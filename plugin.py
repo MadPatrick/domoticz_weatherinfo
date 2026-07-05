@@ -18,10 +18,10 @@
         </param>
         <param field="Mode5" label="Text device" width="220px">
             <options>
-                <option label="Status → temperatuur" value="temp"/>
-                <option label="Status → temperatuur → logo" value="temp_logo"/>
-                <option label="Status → temperatuur → logo → wind" value="temp_logo_wind"/>
-                <option label="Status → temperatuur → omschrijving → logo → wind" value="temp_desc_logo_wind" default="true"/>
+                <option label="Status > temperatuur" value="temp"/>
+                <option label="Status > temperatuur > logo" value="temp_logo"/>
+                <option label="Status > temperatuur > logo > wind" value="temp_logo_wind"/>
+                <option label="Status > temperatuur > omschrijving > logo > wind" value="temp_desc_logo_wind" default="true"/>
             </options>
         </param>
         <param field="Mode6" label="Debug" width="75px">
