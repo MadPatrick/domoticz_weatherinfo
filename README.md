@@ -1,32 +1,26 @@
 # Domoticz Rain Forecast
 
-Deze plugin haalt neerslagverwachting op van Buienradar en toont die in Domoticz.
-This plugin retrieves rain forecast data from Buienradar and updates 3 devices.
+This plugin retrieves rain forecast data from Buienradar and shows it in Domoticz.
+It updates 3 devices automatically.
 
-## Wat doet deze plugin / What does it do
+## What does this plugin do
 
-De plugin leest de `raintext` feed op basis van latitude/longitude en vult ook
-weerinfo aan via de Buienradar JSON feed.
+The plugin reads the Buienradar `raintext` feed based on latitude/longitude and
+adds weather details from the Buienradar JSON feed.
 
-Je krijgt o.a.:
-- actuele regenintensiteit (`mm/u`)
-- geschatte neerslag over de ingestelde poll-interval
-- status tekst in NL of EN
-- optioneel temperatuur, icoon, omschrijving en wind in de tekst
-
-Voorbeeld status (NL):
-- `Het regent nu 0.8 mm/u`
-- `Regen verwacht 1.2 mm/u`
-- `2.4 mm/u regen verwacht om 14:35`
-- `Voorlopig droog ...`
+You get:
+- current rain intensity (`mm/h`)
+- accumulated rain over the configured poll interval (`mm`)
+- status text in NL or EN
+- optional temperature, icon, description, and wind in the text
 
 Example status (EN):
-- `Raining now 0.8 mm/u`
-- `Rain expected 1.2 mm/u`
-- `2.4 mm/u rain expected at 14:35`
-- `Dry for now ...`
+- `Raining now 0.8 mm/h`
+- `Rain expected 1.2 mm/h`
+- `Rain expected at 14:35: 2.4 mm/h`
+- `Dry for now <icon> - 19.7°C - Cloudy NW4`
 
-## Installatie / Installation
+## Installation
 
 ```bash
 cd /home/domoticz/plugins
@@ -34,36 +28,36 @@ git clone https://github.com/MadPatrick/domoticz_rainforecast Rain_Forecast
 sudo systemctl restart domoticz
 ```
 
-Ga daarna naar / Then go to:
+Then go to:
 
 ```text
 Setup -> Hardware
 ```
 
-Voeg hardware toe met type **Rain Forecast**.
+Add hardware with type **Rain Forecast**.
 
-## Configuratie / Configuration
+## Configuration
 
-Onderstaande labels zijn exact zoals in het script:
+The labels below are exactly as defined in the script:
 
-| Field (script) | Uitleg / Description | Default |
+| Field (script) | Description | Default |
 | --- | --- | --- |
-| `Latitude (lat)` | Optionele override voor latitude. Leeg = Domoticz systeemlocatie. | empty |
-| `Longitude (lon)` | Optionele override voor longitude. Leeg = Domoticz systeemlocatie. | empty |
-| `Poll-interval (min)` | Hoe vaak de plugin Buienradar opvraagt / Poll frequency in minutes. | `5` |
-| `Language` | Taal voor statusbericht (`NL` of `EN`). | `NL` |
-| `Text device` | Welke onderdelen in de tekst komen. | `Status - temperature - description - logo - wind` |
+| `Latitude (lat)` | Optional latitude override. Empty = Domoticz system location. | empty |
+| `Longitude (lon)` | Optional longitude override. Empty = Domoticz system location. | empty |
+| `Poll-interval (min)` | Poll frequency in minutes. | `5` |
+| `Language` | Status text language (`NL` or `EN`). | `NL` |
+| `Text device` | Which parts are included in the text output. | `Status - temperature - description - logo - wind` |
 | `Debug` | Extra Domoticz debug logging (`Yes`/`No`). | `No` |
 
-`Text device` opties (exact script labels):
+`Text device` options (exact script labels):
 - `Status - temperature`
 - `Status - temperature - logo`
 - `Status - temperature - logo - wind`
 - `Status - temperature - description - logo - wind`
 
-## Devices die worden aangemaakt / Created devices
+## Created devices
 
-De plugin maakt automatisch deze devices aan (exact script names):
+The plugin creates these devices automatically (exact script names):
 
 | Unit | Name (script) | Type |
 | --- | --- | --- |
@@ -71,29 +65,29 @@ De plugin maakt automatisch deze devices aan (exact script names):
 | `2` | `Rain forecast` | `Text` |
 | `3` | `Temperature` | `Temperature` |
 
-## Werking in het kort / How it works (short)
+## How it works (short)
 
-1. Plugin start en leest configuratie.
-2. Devices worden aangemaakt als ze nog niet bestaan.
-3. Data wordt periodiek opgehaald van Buienradar.
-4. Rain raw values worden omgerekend naar `mm/u`.
-5. Regenhoeveelheid wordt geïntegreerd over de ingestelde poll-interval.
-6. Devices worden alleen geüpdatet als er echt iets verandert.
+1. The plugin starts and reads configuration.
+2. Devices are created if they do not exist yet.
+3. Data is fetched periodically from Buienradar.
+4. Raw rain values are converted to `mm/h`.
+5. Rain amount is integrated over the configured poll interval.
+6. Devices are updated only when values change.
 
 ## Troubleshooting
 
-### Plugin niet zichtbaar / Plugin not visible
-Controleer de mapnaam in `/home/domoticz/plugins` en herstart Domoticz.
+### Plugin not visible
+Check the plugin folder name in `/home/domoticz/plugins` and restart Domoticz.
 
-### Geen data / No data
-Controleer internettoegang en coördinaten.
-Gebruikte rain URL:
+### No data
+Check internet connectivity and coordinates.
+Used rain URL:
 `https://gpsgadget.buienradar.nl/data/raintext?lat=<lat>&lon=<lon>`
 
-### Tekst blijft "Voorlopig droog" / Text stays "Dry for now"
-Meestal voorspelt Buienradar dan geen regen op die locatie.
+### Text stays "Voorlopig droog" / "Dry for now"
+Usually Buienradar is not forecasting rain for that location.
 
-## Updaten / Updating
+## Updating
 
 ```bash
 cd /home/domoticz/plugins/Rain_Forecast
