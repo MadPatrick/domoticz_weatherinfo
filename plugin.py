@@ -6,14 +6,14 @@
         Retrieves the upcoming rainfall forecast from Buienradar and current weather
         conditions from Open-Meteo, and updates three Domoticz devices:
         <ul>
-            <li><b>Rain sensor</b> – current rain rate and accumulated total.</li>
-            <li><b>Text device</b> – configurable status line with rain status,
+            <li><b>Rain sensor</b> â€“ current rain rate and accumulated total.</li>
+            <li><b>Text device</b> â€“ configurable status line with rain status,
                 temperature, weather description, wind (Beaufort + direction),
                 and a weather icon (emoji).</li>
-            <li><b>Temperature device</b> – current temperature from Open-Meteo.</li>
+            <li><b>Temperature device</b> â€“ current temperature from Open-Meteo.</li>
         </ul>
-        Weather icons are resolved in order: WMO weather code (Open-Meteo) →
-        Buienradar icon code → weather description text as a last fallback.
+        Weather icons are resolved in order: WMO weather code (Open-Meteo) â†’
+        Buienradar icon code â†’ weather description text as a last fallback.
         Coordinates default to the Domoticz location settings when left blank.
     </description>
     <params>
@@ -100,6 +100,7 @@ WEATHER_ICON_MAP = {
     "w": {"day": ("&#x1F327;", "#7FB3D5"), "night": ("&#x1F327;", "#7FB3D5")},  # zwaar bewolkt + regen/winterse neerslag
 }
 DEFAULT_ICON = ("&#x2601;", "#D3D3D3")
+GREEN_DOT = '<span style="color:green;">&#9679;</span>'
 
 WMO_DESCRIPTIONS = {
     0:  "Onbewolkt",
@@ -410,12 +411,13 @@ def build_weather_suffix(weather_info: Optional[dict], text_mode: str) -> Tuple[
         else:
             html_sections.append(icon_html)
 
-    return " ~ ".join(html_sections), " - ".join(text_sections)
+    return f" {GREEN_DOT} ".join(html_sections), " - ".join(text_sections)
 
 def append_weather_to_status(status_html: str, status_log: str, weather_info: Optional[dict], text_mode: str) -> Tuple[str, str]:
     suffix_html, suffix_log = build_weather_suffix(weather_info, text_mode)
     if suffix_html:
-        status_html = f"{status_html}&nbsp;&nbsp; ~ {suffix_html}"
+        # Verander de tilde hier naar de GREEN_DOT constante
+        status_html = f"{status_html}&nbsp; {GREEN_DOT} {suffix_html}"
     if suffix_log:
         status_log = f"{status_log} - {suffix_log}"
     return status_html, status_log
