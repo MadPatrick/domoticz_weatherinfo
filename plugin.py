@@ -1,8 +1,8 @@
 """
-<plugin key="RainForecast" name="Rain Forecast" author="MadPatrick" version="1.1.1" externallink="https://buienradar.nl" wikilink="https://github.com/MadPatrick/domoticz_rainforecast">
+<plugin key="RainForecast" name="Rain Forecast" author="MadPatrick" version="1.1.2" externallink="https://buienradar.nl" wikilink="https://github.com/MadPatrick/domoticz_rainforecast">
     <description>
         <h2>Buienradar</h2>
-        <p>Version 1.1.1</p>
+        <p>Version 1.1.2</p>
         Retrieves the upcoming rainfall forecast from Buienradar and updates
         three devices: a Rain sensor, a Text device, and a Temperature device.
         Weather icons are mapped directly from Buienradar's iconurl codes
