@@ -42,14 +42,17 @@ import Domoticz
 import re
 import json
 import html
-from datetime import datetime
 import urllib.request
 import urllib.error
 import threading
 from typing import Optional, Tuple
 
 BUIENRADAR_URL = "https://gpsgadget.buienradar.nl/data/raintext?lat={lat}&lon={lon}"
-BUIENRADAR_JSON_URL = "https://data.buienradar.nl/2.0/feed/json"
+OPEN_METEO_URL = (
+    "https://api.open-meteo.com/v1/forecast?"
+    "latitude={lat}&longitude={lon}"
+    "&current=temperature_2m,wind_speed_10m,wind_direction_10m,weather_code,is_day"
+)
 UNIT_RAIN = 1
 UNIT_TEXT = 2
 UNIT_TEMP = 3
@@ -89,6 +92,51 @@ WEATHER_ICON_MAP = {
     "w": {"day": ("&#x1F327;", "#7FB3D5"), "night": ("&#x1F327;", "#7FB3D5")},  # zwaar bewolkt + regen/winterse neerslag
 }
 DEFAULT_ICON = ("&#x2601;", "#D3D3D3")
+
+WMO_DESCRIPTIONS = {
+    0:  "Onbewolkt",
+    1:  "Hoofdzakelijk helder",
+    2:  "Gedeeltelijk bewolkt",
+    3:  "Bewolkt",
+    45: "Mist",
+    48: "IJsmist",
+    51: "Motregen",
+    53: "Motregen",
+    55: "Motregen",
+    56: "IJzel",
+    57: "IJzel",
+    61: "Lichte regen",
+    63: "Regen",
+    65: "Zware regen",
+    66: "IJzel",
+    67: "IJzel",
+    71: "Lichte sneeuw",
+    73: "Sneeuw",
+    75: "Zware sneeuw",
+    77: "Sneeuwkorrels",
+    80: "Lichte bui",
+    81: "Bui",
+    82: "Zware bui",
+    85: "Lichte sneeuwbui",
+    86: "Zware sneeuwbui",
+    95: "Onweer",
+    96: "Onweer met hagel",
+    99: "Onweer met zware hagel",
+}
+
+_BEAUFORT_THRESHOLDS = [1, 6, 12, 20, 29, 39, 50, 62, 75, 89, 103, 118]
+
+def kmh_to_beaufort(kmh: float) -> int:
+    for bft, threshold in enumerate(_BEAUFORT_THRESHOLDS):
+        if kmh < threshold:
+            return bft
+    return 12
+
+_COMPASS_DIRS = ["N", "NO", "O", "ZO", "Z", "ZW", "W", "NW"]
+
+def degrees_to_compass(degrees: float) -> str:
+    index = round(degrees / 45) % 8
+    return _COMPASS_DIRS[index]
 
 TEXT_DEVICE_MODES = {
     "temp": {
@@ -214,97 +262,6 @@ def parse_buienradar(data: str):
         "max_raw":       max_raw,
         "first_rain_at": first_rain_at,
     }
-
-def add_forecast_weather(weather_info: dict, forecast: Optional[dict]) -> None:
-    if not forecast:
-        return
-
-    iconurl = normalize_icon_url(forecast.get("iconurl"))
-    if iconurl and not weather_info.get("iconurl"):
-        weather_info["iconurl"] = iconurl
-
-    weatherdescription = str(forecast.get("weatherdescription") or "").strip()
-    if weatherdescription and not weather_info.get("weatherdescription"):
-        weather_info["weatherdescription"] = weatherdescription
-
-def normalize_icon_url(value: Optional[str]) -> str:
-    iconurl = str(value or "").strip()
-    if iconurl.startswith("//"):
-        return "https:" + iconurl
-    if iconurl.startswith("/"):
-        return "https://www.buienradar.nl" + iconurl
-    return iconurl
-
-def find_today_forecast(json_data: dict) -> Optional[dict]:
-    forecasts = json_data.get("buienradar", {}).get("fivedayforecast", [])
-    if not forecasts:
-        return None
-
-    today = datetime.now().date()
-    for forecast in forecasts:
-        try:
-            forecast_day = datetime.fromisoformat(str(forecast.get("day"))).date()
-        except (TypeError, ValueError):
-            continue
-        if forecast_day == today:
-            return forecast
-
-    return forecasts[0]
-
-def find_nearest_station_weather(json_data: dict, lat: float, lon: float) -> Optional[dict]:
-    stations = json_data.get("actual", {}).get("stationmeasurements", [])
-    weather_info = {}
-
-    if not stations:
-        add_forecast_weather(weather_info, find_today_forecast(json_data))
-        return weather_info or None
-
-    nearest_station = None
-    nearest_dist = None
-
-    for station in stations:
-        try:
-            s_lat = float(station["lat"])
-            s_lon = float(station["lon"])
-        except (KeyError, TypeError, ValueError):
-            continue
-
-        dist = (s_lat - lat) ** 2 + (s_lon - lon) ** 2
-        if nearest_dist is None or dist < nearest_dist:
-            nearest_dist = dist
-            nearest_station = station
-
-    if nearest_station is None:
-        return weather_info or None
-
-    try:
-        weather_info["temperature"] = float(nearest_station["temperature"])
-    except (KeyError, TypeError, ValueError):
-        pass
-
-    iconurl = normalize_icon_url(nearest_station.get("iconurl") or nearest_station.get("fullIconUrl"))
-    if iconurl:
-        weather_info["iconurl"] = iconurl
-
-    winddirection = str(nearest_station.get("winddirection") or "").strip()
-    if winddirection:
-        weather_info["winddirection"] = winddirection
-
-    try:
-        weather_info["windspeed_bft"] = int(float(nearest_station["windspeedBft"]))
-    except (KeyError, TypeError, ValueError):
-        try:
-            weather_info["windspeed_bft"] = int(float(nearest_station["windforce"]))
-        except (KeyError, TypeError, ValueError):
-            pass
-
-    weatherdescription = str(nearest_station.get("weatherdescription") or "").strip()
-    if weatherdescription:
-        weather_info["weatherdescription"] = weatherdescription
-
-    add_forecast_weather(weather_info, find_today_forecast(json_data))
-
-    return weather_info or None
 
 def build_wind_text(weather_info: dict) -> str:
     direction = str(weather_info.get("winddirection") or "").strip()
@@ -588,7 +545,6 @@ class BasePlugin:
                 if self._debug:
                     Domoticz.Debug(
                         "Weather info: "
-                        f"iconurl={weather_info.get('iconurl', '')}, "
                         f"temperature={weather_info.get('temperature', '')}, "
                         f"weatherdescription={weather_info.get('weatherdescription', '')}, "
                         f"winddirection={weather_info.get('winddirection', '')}, "
@@ -597,34 +553,52 @@ class BasePlugin:
             self._process(data, self._weather_info)
 
     def _fetch_weather_info(self) -> Optional[dict]:
+        url = OPEN_METEO_URL.format(lat=self._lat, lon=self._lon)
         try:
-            with urllib.request.urlopen(BUIENRADAR_JSON_URL, timeout=10) as resp:
+            with urllib.request.urlopen(url, timeout=10) as resp:
                 raw = resp.read().decode("utf-8", errors="replace")
         except urllib.error.HTTPError as e:
-            Domoticz.Error(f"Buienradar weather HTTP error (status code: {e.code})")
+            Domoticz.Error(f"Open-Meteo HTTP error (status code: {e.code})")
             return None
         except Exception as e:
-            Domoticz.Error(f"Buienradar weather connection error: {e}")
+            Domoticz.Error(f"Open-Meteo connection error: {e}")
             return None
 
         try:
             json_data = json.loads(raw)
         except ValueError:
-            Domoticz.Error("Unexpected format in Buienradar weather response")
+            Domoticz.Error("Unexpected format in Open-Meteo response")
             return None
+
+        current = json_data.get("current")
+        if not current:
+            Domoticz.Error("Missing 'current' data in Open-Meteo response")
+            return None
+
+        weather_info = {}
 
         try:
-            lat = float(self._lat)
-            lon = float(self._lon)
-        except (TypeError, ValueError):
-            return None
+            weather_info["temperature"] = float(current["temperature_2m"])
+        except (KeyError, TypeError, ValueError):
+            pass
 
-        weather_info = find_nearest_station_weather(json_data, lat, lon)
-        if weather_info is None:
-            Domoticz.Error("Could not determine weather information from Buienradar response")
-            return None
+        try:
+            weather_info["windspeed_bft"] = kmh_to_beaufort(float(current["wind_speed_10m"]))
+        except (KeyError, TypeError, ValueError):
+            pass
 
-        return weather_info
+        try:
+            weather_info["winddirection"] = degrees_to_compass(float(current["wind_direction_10m"]))
+        except (KeyError, TypeError, ValueError):
+            pass
+
+        try:
+            wmo_code = int(current["weather_code"])
+            weather_info["weatherdescription"] = WMO_DESCRIPTIONS.get(wmo_code, "")
+        except (KeyError, TypeError, ValueError):
+            pass
+
+        return weather_info or None
 
     def _process(self, data: str, weather_info: Optional[dict]):
         p = parse_buienradar(data)
