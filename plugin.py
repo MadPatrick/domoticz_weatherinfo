@@ -552,10 +552,10 @@ class BasePlugin:
     def onHeartbeat(self):
         while not self.message_queue.empty():
             msg = self.message_queue.get()
-            
+
             if msg["type"] == "error":
                 Domoticz.Error(msg["msg"])
-                
+
             elif msg["type"] == "data":
                 weather_info = msg["weather_info"]
                 if weather_info is not None:
@@ -568,7 +568,7 @@ class BasePlugin:
                             f"winddirection={weather_info.get('winddirection', '')}, "
                             f"windspeed_bft={weather_info.get('windspeed_bft', '')}"
                         )
-                
+
                 self._process(msg["data"], self._weather_info)
 
         self._ticks += 1
@@ -645,8 +645,8 @@ class BasePlugin:
         weather_info = self._fetch_weather_info()
 
         self.message_queue.put({
-            "type": "data", 
-            "data": data, 
+            "type": "data",
+            "data": data,
             "weather_info": weather_info
         })
 
