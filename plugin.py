@@ -1,12 +1,20 @@
 """
 <plugin key="RainForecast" name="Rain Forecast" author="MadPatrick" version="1.1.2" externallink="https://buienradar.nl" wikilink="https://github.com/MadPatrick/domoticz_rainforecast">
     <description>
-        <h2>Buienradar</h2>
+        <h2>Rain Forecast (Buienradar + Open-Meteo)</h2>
         <p>Version 1.1.2</p>
-        Retrieves the upcoming rainfall forecast from Buienradar and updates
-        three devices: a Rain sensor, a Text device, and a Temperature device.
-        Weather icons are mapped directly from Buienradar's iconurl codes
-        (Unicode hex entities), with the text description used only as a fallback.
+        Retrieves the upcoming rainfall forecast from Buienradar and current weather
+        conditions from Open-Meteo, and updates three Domoticz devices:
+        <ul>
+            <li><b>Rain sensor</b> – current rain rate and accumulated total.</li>
+            <li><b>Text device</b> – configurable status line with rain status,
+                temperature, weather description, wind (Beaufort + direction),
+                and a weather icon (emoji).</li>
+            <li><b>Temperature device</b> – current temperature from Open-Meteo.</li>
+        </ul>
+        Weather icons are resolved in order: WMO weather code (Open-Meteo) →
+        Buienradar icon code → weather description text as a last fallback.
+        Coordinates default to the Domoticz location settings when left blank.
     </description>
     <params>
         <param field="Mode1" label="Latitude (lat)"  width="80px" default="">
