@@ -340,6 +340,8 @@ def map_weather_icon_entity(weatherdescription: str) -> Tuple[str, str]:
         return "&#x1F327;", "#4FC3F7"
     if "onbewolkt" in desc or "zonnig" in desc or "helder" in desc:
         return "&#x2600;", "#FFC107"
+    if "gedeeltelijk bewolkt" in desc or "opklaringen" in desc:
+        return "&#x26C5;", "#FFC107"
     if "bewolkt" in desc:
         return "&#x2601;", "#D3D3D3"
 
