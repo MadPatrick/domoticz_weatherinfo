@@ -1,8 +1,8 @@
 """
-<plugin key="WeatherInfo" name="Weather Info" author="MadPatrick" version="1.2.0" externallink="https://buienradar.nl" wikilink="https://github.com/MadPatrick/domoticz_rainforecast">
+<plugin key="WeatherInfo" name="Weather Info" author="MadPatrick" version="1.2.1" externallink="https://buienradar.nl" wikilink="https://github.com/MadPatrick/domoticz_rainforecast">
     <description>
         <h2>Weather Info (Buienradar + Open-Meteo)</h2>
-        <p>Version 1.2.0</p>
+        <p>Version 1.2.1</p>
         Retrieves the upcoming rainfall forecast from Buienradar and current weather
         conditions from Open-Meteo, and updates three Domoticz devices:
         <ul>
@@ -409,10 +409,7 @@ def build_weather_suffix(weather_info: Optional[dict], text_mode: str) -> Tuple[
         text_sections.append(wind_text)
 
     if mode["icon"] and icon_html:
-        if html_sections:
-            html_sections[-1] = f"{html_sections[-1]}&nbsp;{icon_html}"
-        else:
-            html_sections.append(icon_html)
+        html_sections.append(icon_html)
 
     return f" {GREEN_DOT} ".join(html_sections), " - ".join(text_sections)
 
