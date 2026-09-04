@@ -1,8 +1,8 @@
 """
-<plugin key="WeatherInfo" name="Weather Info" author="MadPatrick" version="1.2.1" externallink="https://buienradar.nl" wikilink="https://github.com/MadPatrick/domoticz_rainforecast">
+<plugin key="WeatherInfo" name="Weather Info" author="MadPatrick" version="1.2.2" externallink="https://buienradar.nl" wikilink="https://github.com/MadPatrick/domoticz_rainforecast">
     <description>
         <h2>Weather Info (Buienradar + Open-Meteo)</h2>
-        <p>Version 1.2.1</p>
+        <p>Version 1.2.2</p>
         Retrieves the upcoming rainfall forecast from Buienradar and current weather
         conditions from Open-Meteo, and updates three Domoticz devices:
         <ul>
@@ -136,6 +136,42 @@ WMO_DESCRIPTIONS = {
     99: "Onweer met zware hagel",
 }
 
+WMO_DESCRIPTIONS_EN = {
+    0:  "Clear",
+    1:  "Mainly clear",
+    2:  "Partly cloudy",
+    3:  "Cloudy",
+    45: "Fog",
+    48: "Rime fog",
+    51: "Drizzle",
+    53: "Drizzle",
+    55: "Drizzle",
+    56: "Freezing drizzle",
+    57: "Freezing drizzle",
+    61: "Light rain",
+    63: "Rain",
+    65: "Heavy rain",
+    66: "Freezing rain",
+    67: "Freezing rain",
+    71: "Light snow",
+    73: "Snow",
+    75: "Heavy snow",
+    77: "Snow grains",
+    80: "Light showers",
+    81: "Showers",
+    82: "Heavy showers",
+    85: "Light snow showers",
+    86: "Heavy snow showers",
+    95: "Thunderstorm",
+    96: "Thunderstorm with hail",
+    99: "Thunderstorm with heavy hail",
+}
+
+WMO_DESCRIPTIONS_BY_LANG = {
+    "NL": WMO_DESCRIPTIONS,
+    "EN": WMO_DESCRIPTIONS_EN,
+}
+
 WMO_ICON_MAP = {
     0:  ("&#x2600;",  "#FFC107"),  # onbewolkt
     1:  ("&#x26C5;",  "#FFC107"),  # hoofdzakelijk helder
@@ -176,10 +212,16 @@ def kmh_to_beaufort(kmh: float) -> int:
     return 12
 
 _COMPASS_DIRS = ["N", "NO", "O", "ZO", "Z", "ZW", "W", "NW"]
+_COMPASS_DIRS_EN = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+_COMPASS_DIRS_BY_LANG = {
+    "NL": _COMPASS_DIRS,
+    "EN": _COMPASS_DIRS_EN,
+}
 
-def degrees_to_compass(degrees: float) -> str:
+def degrees_to_compass(degrees: float, language: str = "NL") -> str:
+    dirs = _COMPASS_DIRS_BY_LANG.get(language, _COMPASS_DIRS)
     index = int((degrees + 22.5) / 45) % 8
-    return _COMPASS_DIRS[index]
+    return dirs[index]
 
 TEXT_DEVICE_MODES = {
     "temp": {
@@ -450,6 +492,7 @@ class BasePlugin:
         self._ticks     = 0
         self._openmeteo_ticks = 0
         self._openmeteo_ticks_needed = (POLL_OPENMETEO * 60) // self._heartbeat
+        self._location_retry_ticks = 0
         self._lat_source = "Domoticz"
         self._lon_source = "Domoticz"
         self._language  = "NL"
@@ -515,15 +558,15 @@ class BasePlugin:
         self._load_device_icon()
 
         if not self._resolve_location():
+            Domoticz.Log(
+                "Location could not be resolved yet - will keep retrying "
+                "periodically and start once it becomes available."
+            )
             return
 
-        try:
-            self._interval = max(1, int(Parameters["Mode3"]))
-        except ValueError:
-            self._interval = 10
+        self._start_polling()
 
-        Domoticz.Heartbeat(self._heartbeat)
-
+    def _create_devices(self):
         if UNIT_RAIN not in Devices:
             Domoticz.Device(Name="Rainfall", Unit=UNIT_RAIN,
                             TypeName="Rain", Image=self.imageID, Used=1).Create()
@@ -539,6 +582,15 @@ class BasePlugin:
                             TypeName="Temperature", Image=self.imageID, Used=1).Create()
             Domoticz.Log("Device 'Temperature' created")
 
+    def _start_polling(self):
+        try:
+            self._interval = max(1, int(Parameters["Mode3"]))
+        except ValueError:
+            self._interval = 10
+
+        Domoticz.Heartbeat(self._heartbeat)
+
+        self._create_devices()
         self._apply_device_icon()
 
         Domoticz.Log(f"Plugin started - version {self._plugin_version()}")
@@ -570,6 +622,22 @@ class BasePlugin:
                         )
 
                 self._process(msg["data"], self._weather_info)
+
+        if self._lat is None or self._lon is None:
+            # Location isn't known yet (e.g. Domoticz Settings["Location"] was
+            # blank at startup). Don't hammer the weather APIs with
+            # lat=None&lon=None - periodically retry resolving the location
+            # instead, and resume normal operation once it succeeds.
+            self._location_retry_ticks += 1
+            retry_ticks_needed = max(1, (self._interval * 60) // self._heartbeat)
+            if self._location_retry_ticks < retry_ticks_needed:
+                return
+            self._location_retry_ticks = 0
+            if not self._resolve_location():
+                return
+            Domoticz.Log("Location resolved - resuming normal operation.")
+            self._start_polling()
+            return
 
         self._ticks += 1
         self._openmeteo_ticks += 1
@@ -692,14 +760,15 @@ class BasePlugin:
             pass
 
         try:
-            weather_info["winddirection"] = degrees_to_compass(float(current["wind_direction_10m"]))
+            weather_info["winddirection"] = degrees_to_compass(float(current["wind_direction_10m"]), self._language)
         except (KeyError, TypeError, ValueError):
             pass
 
         try:
             wmo_code = int(current["weather_code"])
             weather_info["wmo_code"] = wmo_code
-            weather_info["weatherdescription"] = WMO_DESCRIPTIONS.get(wmo_code, "")
+            wmo_descriptions = WMO_DESCRIPTIONS_BY_LANG.get(self._language, WMO_DESCRIPTIONS)
+            weather_info["weatherdescription"] = wmo_descriptions.get(wmo_code, "")
         except (KeyError, TypeError, ValueError):
             pass
 
@@ -715,37 +784,48 @@ class BasePlugin:
             self._text_mode
         )
 
-        rain_dev = Devices[UNIT_RAIN]
-        try:
-            parts         = rain_dev.sValue.split(";") if rain_dev.sValue else []
-            current_rate  = float(parts[0]) if len(parts) > 0 else 0.0
-            current_total = float(parts[1]) if len(parts) > 1 else 0.0
-        except ValueError:
-            current_rate, current_total = 0.0, 0.0
+        if UNIT_RAIN in Devices:
+            rain_dev = Devices[UNIT_RAIN]
+            try:
+                parts         = rain_dev.sValue.split(";") if rain_dev.sValue else []
+                current_rate  = float(parts[0]) if len(parts) > 0 else 0.0
+                current_total = float(parts[1]) if len(parts) > 1 else 0.0
+            except ValueError:
+                current_rate, current_total = 0.0, 0.0
 
-        rain_increment = rain_amount_for_interval(p["rain_values"], self._interval)
-        new_rate       = round(p["mm_now"] * 100)
-        new_total      = current_total + rain_increment
+            rain_increment = rain_amount_for_interval(p["rain_values"], self._interval)
+            new_rate       = round(p["mm_now"] * 100)
+            new_total      = current_total + rain_increment
 
-        if self._debug:
-            Domoticz.Debug(f"Rain calc: now={fmt(p['mm_now'])} mm/u, "
-                           f"interval={self._interval} min, "
-                           f"add={rain_increment:.3f} mm, total={new_total:.2f} mm")
+            if self._debug:
+                Domoticz.Debug(f"Rain calc: now={fmt(p['mm_now'])} mm/u, "
+                               f"interval={self._interval} min, "
+                               f"add={rain_increment:.3f} mm, total={new_total:.2f} mm")
 
-        new_svalue     = f"{new_rate:.0f};{new_total:.2f}"
-        current_svalue = f"{current_rate:.0f};{current_total:.2f}"
+            new_svalue     = f"{new_rate:.0f};{new_total:.2f}"
+            current_svalue = f"{current_rate:.0f};{current_total:.2f}"
 
-        if new_svalue != current_svalue:
-            rain_dev.Update(nValue=0, sValue=new_svalue)
+            if new_svalue != current_svalue:
+                rain_dev.Update(nValue=0, sValue=new_svalue)
+        elif self._debug:
+            Domoticz.Debug(f"Skipping rain update - device unit {UNIT_RAIN} not found.")
 
-        text_dev = Devices[UNIT_TEXT]
-        if text_dev.sValue != status_html:
-            text_dev.Update(nValue=0, sValue=status_html)
+        if UNIT_TEXT in Devices:
+            text_dev = Devices[UNIT_TEXT]
+            if text_dev.sValue != status_html:
+                text_dev.Update(nValue=0, sValue=status_html)
+        elif self._debug:
+            Domoticz.Debug(f"Skipping text update - device unit {UNIT_TEXT} not found.")
 
         if weather_info and weather_info.get("temperature") is not None:
             self._process_temperature(weather_info["temperature"])
 
     def _process_temperature(self, temperature: float):
+        if UNIT_TEMP not in Devices:
+            if self._debug:
+                Domoticz.Debug(f"Skipping temperature update - device unit {UNIT_TEMP} not found.")
+            return
+
         temp_dev = Devices[UNIT_TEMP]
         new_svalue = fmt(temperature, 1)
         if temp_dev.sValue != new_svalue:
