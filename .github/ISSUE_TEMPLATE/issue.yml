@@ -1,8 +1,5 @@
 name: Issue
 description: Report a problem, suggest an improvement, or ask a question
-title: ''
-labels: []
-assignees: []
 
 body:
   - type: markdown
@@ -13,7 +10,7 @@ body:
         Before submitting, search the existing issues to avoid creating a duplicate. Do not include passwords, API keys, access tokens, or other sensitive information.
 
   - type: dropdown
-    id: type
+    id: issue-type
     attributes:
       label: Issue type
       description: Select the option that best describes this issue.
@@ -39,7 +36,7 @@ body:
     id: steps
     attributes:
       label: Steps to reproduce
-      description: If this is a bug, list the steps needed to reproduce it. Otherwise, you may leave this field empty.
+      description: If this is a bug, list the steps needed to reproduce it.
       placeholder: |
         1. Go to ...
         2. Click on ...
@@ -69,14 +66,14 @@ body:
     id: logs
     attributes:
       label: Logs or error output
-      description: Paste any relevant logs or error messages. Remove sensitive information first.
+      description: Paste relevant logs or error messages. Remove sensitive information first.
       render: shell
 
   - type: textarea
     id: additional-context
     attributes:
       label: Additional context
-      description: Add screenshots, links, examples, or any other useful information.
+      description: Add screenshots, links, examples, or other useful information.
 
   - type: checkboxes
     id: checklist
