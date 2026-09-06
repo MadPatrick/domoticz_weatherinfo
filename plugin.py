@@ -1,10 +1,10 @@
 """
-<plugin key="WeatherInfo" name="Weather Info" author="MadPatrick" version="1.2.2" externallink="https://buienradar.nl" wikilink="https://github.com/MadPatrick/domoticz_rainforecast">
+<plugin key="WeatherInfo" name="Weather Info" author="MadPatrick" version="1.3.0" externallink="https://buienradar.nl" wikilink="https://github.com/MadPatrick/domoticz_rainforecast">
     <description>
         <h2>Weather Info (Buienradar + Open-Meteo)</h2>
-        <p>Version 1.2.2</p>
-        Retrieves the upcoming rainfall forecast from Buienradar and current weather
-        conditions from Open-Meteo, and updates three Domoticz devices:
+        <p><strong>Version:</strong> 1.3.0</p>
+        <p>Retrieves the upcoming rainfall forecast from Buienradar and current weather
+        conditions from Open-Meteo, and updates three Domoticz devices:</p>
         <ul>
             <li><b>Rain sensor</b> - current rain rate and accumulated total.</li>
             <li><b>Text device</b> - configurable status line with rain status,
@@ -12,22 +12,33 @@
                 and a weather icon (emoji).</li>
             <li><b>Temperature device</b> - current temperature from Open-Meteo.</li>
         </ul>
-        Weather icons are resolved in order: WMO weather code (Open-Meteo) ->
+        <p>Weather icons are resolved in order: WMO weather code (Open-Meteo) ->
         Buienradar icon code -> weather description text as a last fallback.
-        Coordinates default to the Domoticz location settings when left blank.
-    </description>    <params>
-        <param field="Mode1" label="Latitude (lat)"  width="80px" default="">
-            <description><br/>Leave LAT and LON blank for Domoticz settings<br/></description>
+        Coordinates default to the Domoticz location settings when left blank.</p>
+    </description>
+    <params>
+        <param field="Latitude" label="Latitude (lat)"  width="80px" default="">
+            <description>
+                <h4 style="margin:4px 0 6px 0;">Location</h4>
+                <br/>Leave LAT and LON blank for Domoticz settings<br/>
+            </description>
         </param>
-        <param field="Mode2" label="Longitude (lon)" width="80px" default=""/>
-        <param field="Mode3" label="Poll-interval (min)" width="80px"  required="true" default="5"/>
-        <param field="Mode4" label="Language" width="75px">
+        <param field="Longitude" label="Longitude (lon)" width="80px" default=""/>
+        <param field="PollInterval" label="Poll-interval (min)" width="80px"  required="true" default="5">
+            <description>
+                <h4 style="margin:14px 0 6px 0; border-top:1px solid #ccc; padding-top:8px;">Polling</h4>
+            </description>
+        </param>
+        <param field="Language" label="Language" width="75px">
+            <description>
+                <h4 style="margin:14px 0 6px 0; border-top:1px solid #ccc; padding-top:8px;">Display</h4>
+            </description>
             <options>
                 <option label="NL" value="NL" default="true"/>
                 <option label="EN" value="EN"/>
             </options>
         </param>
-        <param field="Mode5" label="Text device" width="220px">
+        <param field="TextDeviceFormat" label="Text device" width="220px">
             <options>
                 <option label="Status - temperature" value="temp"/>
                 <option label="Status - temperature - logo" value="temp_logo"/>
@@ -35,11 +46,10 @@
                 <option label="Status - temperature - description - wind - logo" value="temp_desc_logo_wind" default="true"/>
             </options>
         </param>
-        <param field="Mode6" label="Debug" width="75px">
-            <options>
-                <option label="Yes" value="Debug"/>
-                <option label="No" value="Normal" default="true"/>
-            </options>
+        <param field="EnableDebug" type="boolean" label="Debug" default="false">
+            <description>
+                <h4 style="margin:14px 0 6px 0; border-top:1px solid #ccc; padding-top:8px;">Logging</h4>
+            </description>
         </param>
     </params>
 </plugin>
@@ -61,7 +71,7 @@ OPEN_METEO_URL = (
     "latitude={lat}&longitude={lon}"
     "&current=temperature_2m,wind_speed_10m,wind_direction_10m,weather_code"
 )
-POLL_OPENMETEO = 15          # fetch Open-Meteo once every N minutes (independent of Mode3)
+POLL_OPENMETEO = 15          # fetch Open-Meteo once every N minutes (independent of PollInterval)
 UNIT_RAIN = 1
 UNIT_TEXT = 2
 UNIT_TEMP = 3
@@ -507,6 +517,25 @@ class BasePlugin:
         match = re.search(r'version="([^"]+)"', __doc__ or "")
         return match.group(1) if match else "unknown"
 
+    def _read_migrated_parameter(self, field, legacy_field, default=""):
+        """Read a named setting, falling back to its former ModeX field.
+
+        Empty defaults on the new settings make existing Domoticz hardware
+        configurations continue to work until they are saved with the new
+        field names.
+        """
+        raw = Parameters.get(field, "")
+        if raw is None or str(raw).strip() == "":
+            raw = Parameters.get(legacy_field, "")
+        if raw is None or str(raw).strip() == "":
+            return default
+        return raw
+
+    def _read_migrated_boolean_parameter(self, field, legacy_field, default=False, extra_truthy=()):
+        raw = self._read_migrated_parameter(field, legacy_field, "true" if default else "false")
+        truthy = {"true", "1", "yes", "on"} | {v.lower() for v in extra_truthy}
+        return str(raw).strip().lower() in truthy
+
     def _location_source_summary(self) -> str:
         if self._lat_source == self._lon_source:
             return self._lat_source
@@ -545,11 +574,11 @@ class BasePlugin:
                 Domoticz.Log(f"Icon applied to device '{device.Name}'.")
 
     def onStart(self):
-        self._debug = (Parameters["Mode6"] == "Debug")
-        self._language = Parameters.get("Mode4", "NL")
+        self._debug = self._read_migrated_boolean_parameter("EnableDebug", "Mode6", False, extra_truthy=("Debug",))
+        self._language = str(self._read_migrated_parameter("Language", "Mode4", "NL"))
         if self._language not in LANGUAGE_TEXTS:
             self._language = "NL"
-        self._text_mode = Parameters.get("Mode5", "temp_desc_logo_wind")
+        self._text_mode = str(self._read_migrated_parameter("TextDeviceFormat", "Mode5", "temp_desc_logo_wind"))
         if self._text_mode not in TEXT_DEVICE_MODES:
             self._text_mode = "temp_desc_logo_wind"
         if self._debug:
@@ -584,7 +613,7 @@ class BasePlugin:
 
     def _start_polling(self):
         try:
-            self._interval = max(1, int(Parameters["Mode3"]))
+            self._interval = max(1, int(self._read_migrated_parameter("PollInterval", "Mode3", "10")))
         except ValueError:
             self._interval = 10
 
@@ -650,8 +679,8 @@ class BasePlugin:
             self._fetch_async(fetch_openmeteo)
 
     def _resolve_location(self) -> bool:
-        manual_lat_raw = Parameters.get("Mode1", "")
-        manual_lon_raw = Parameters.get("Mode2", "")
+        manual_lat_raw = self._read_migrated_parameter("Latitude", "Mode1", "")
+        manual_lon_raw = self._read_migrated_parameter("Longitude", "Mode2", "")
         manual_lat, lat_error = parse_manual_coordinate(manual_lat_raw, "latitude (lat)")
         manual_lon, lon_error = parse_manual_coordinate(manual_lon_raw, "longitude (lon)")
 
