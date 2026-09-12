@@ -1,8 +1,8 @@
 """
-<plugin key="WeatherInfo" name="Weather Info" author="MadPatrick" version="1.3.0" externallink="https://buienradar.nl" wikilink="https://github.com/MadPatrick/domoticz_rainforecast">
+<plugin key="WeatherInfo" name="Weather Info" author="MadPatrick" version="1.3.1" externallink="https://buienradar.nl" wikilink="https://github.com/MadPatrick/domoticz_rainforecast">
     <description>
         <h2>Weather Info (Buienradar + Open-Meteo)</h2>
-        <p><strong>Version:</strong> 1.3.0</p>
+        <p><strong>Version:</strong> 1.3.1</p>
         <p>Retrieves the upcoming rainfall forecast from Buienradar and current weather
         conditions from Open-Meteo, and updates three Domoticz devices:</p>
         <ul>
@@ -59,6 +59,7 @@ import Domoticz
 import re
 import json
 import html
+import time
 import urllib.request
 import urllib.error
 import threading
@@ -282,6 +283,27 @@ def parse_manual_coordinate(value: Optional[str], label: str) -> Tuple[Optional[
     if (value or "").strip() and normalized is None:
         return None, f"Invalid {label} in hardware settings."
     return normalized, None
+
+def http_get_with_retry(url: str, timeout: int = 10, retries: int = 3, retry_delay: float = 3.0) -> str:
+    """GET a URL, retrying on transient server errors (5xx) and connection issues.
+
+    Both weather APIs occasionally return 502/503/504 for a few seconds
+    (e.g. Open-Meteo around its hourly model refresh). A short retry with
+    backoff resolves those without needing to wait for the next poll cycle.
+    """
+    attempt = 1
+    while True:
+        try:
+            with urllib.request.urlopen(url, timeout=timeout) as resp:
+                return resp.read().decode("utf-8", errors="replace")
+        except urllib.error.HTTPError as e:
+            if e.code < 500 or attempt >= retries:
+                raise
+        except urllib.error.URLError:
+            if attempt >= retries:
+                raise
+        time.sleep(retry_delay * attempt)
+        attempt += 1
 
 def build_status(prefix: str, mm_now: float, mm_max: Optional[float], range_word: str):
     if mm_max is not None and mm_max > mm_now:
@@ -726,8 +748,7 @@ class BasePlugin:
     def _fetch_and_update(self, fetch_openmeteo: bool = True):
         url = BUIENRADAR_URL.format(lat=self._lat, lon=self._lon)
         try:
-            with urllib.request.urlopen(url, timeout=10) as resp:
-                data = resp.read().decode("utf-8", errors="replace")
+            data = http_get_with_retry(url, timeout=10)
         except urllib.error.HTTPError as e:
             self.message_queue.put({"type": "error", "msg": f"Buienradar HTTP error (status code: {e.code})"})
             return
@@ -756,8 +777,7 @@ class BasePlugin:
     def _fetch_weather_info(self) -> Optional[dict]:
         url = OPEN_METEO_URL.format(lat=self._lat, lon=self._lon)
         try:
-            with urllib.request.urlopen(url, timeout=10) as resp:
-                raw = resp.read().decode("utf-8", errors="replace")
+            raw = http_get_with_retry(url, timeout=10)
         except urllib.error.HTTPError as e:
             self.message_queue.put({"type": "error", "msg": f"Open-Meteo HTTP error (status code: {e.code})"})
             return None
