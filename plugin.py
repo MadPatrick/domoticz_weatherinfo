@@ -490,7 +490,7 @@ def build_weather_icon_html(weather_info: Optional[dict]) -> str:
     alt = html.escape(weatherdescription or "weather", quote=True)
 
     return (f'<span title="{alt}" style="vertical-align: middle; color: {color}; '
-            f'font-size: 2em; line-height: 1;">'
+            f'font-size: 1.5em; line-height: 1;">'
             f'{icon_entity}</span>')
 
 def build_weather_suffix(weather_info: Optional[dict], text_mode: str) -> Tuple[str, str]:
