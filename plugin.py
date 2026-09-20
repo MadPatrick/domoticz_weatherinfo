@@ -70,7 +70,7 @@ BUIENRADAR_URL = "https://gpsgadget.buienradar.nl/data/raintext?lat={lat}&lon={l
 OPEN_METEO_URL = (
     "https://api.open-meteo.com/v1/forecast?"
     "latitude={lat}&longitude={lon}"
-    "&current=temperature_2m,wind_speed_10m,wind_direction_10m,weather_code"
+    "&current=temperature_2m,wind_speed_10m,wind_direction_10m,weather_code,is_day"
 )
 POLL_OPENMETEO = 15          # fetch Open-Meteo once every N minutes (independent of PollInterval)
 UNIT_RAIN = 1
@@ -212,6 +212,15 @@ WMO_ICON_MAP = {
     95: ("&#x26A1;",  "#FFC107"),  # onweer
     96: ("&#x26A1;",  "#FFC107"),  # onweer met hagel
     99: ("&#x26A1;",  "#FFC107"),  # onweer met zware hagel
+}
+
+# Night-time overrides for the WMO codes whose icon differs after dark
+# (clear/mostly clear/partly cloudy); every other code looks the same
+# day or night, same as WEATHER_ICON_MAP above.
+WMO_ICON_MAP_NIGHT = {
+    0: ("&#x1F319;",         "#4A6FA5"),  # onbewolkt/helder
+    1: ("&#x1F319;&#x2601;", "#4A6FA5"),  # hoofdzakelijk helder
+    2: ("&#x1F319;&#x2601;", "#4A6FA5"),  # gedeeltelijk bewolkt
 }
 
 _BEAUFORT_THRESHOLDS = [1, 6, 12, 20, 29, 39, 50, 62, 75, 89, 103, 118]
@@ -439,10 +448,17 @@ def build_weather_icon_html(weather_info: Optional[dict]) -> str:
 
     weatherdescription = str(weather_info.get("weatherdescription") or "").strip()
     wmo_code = weather_info.get("wmo_code")
+    is_day = weather_info.get("is_day", True)
     iconurl = str(weather_info.get("iconurl") or "").strip()
 
+    wmo_icon = None
+    if wmo_code is not None:
+        if not is_day:
+            wmo_icon = WMO_ICON_MAP_NIGHT.get(wmo_code)
+        wmo_icon = wmo_icon or WMO_ICON_MAP.get(wmo_code)
+
     icon_entity, color = (
-        WMO_ICON_MAP.get(wmo_code)
+        wmo_icon
         or map_icon_from_code(extract_icon_code(iconurl))
         or (map_weather_icon_entity(weatherdescription) if weatherdescription else DEFAULT_ICON)
     )
@@ -818,6 +834,11 @@ class BasePlugin:
             weather_info["wmo_code"] = wmo_code
             wmo_descriptions = WMO_DESCRIPTIONS_BY_LANG.get(self._language, WMO_DESCRIPTIONS)
             weather_info["weatherdescription"] = wmo_descriptions.get(wmo_code, "")
+        except (KeyError, TypeError, ValueError):
+            pass
+
+        try:
+            weather_info["is_day"] = bool(int(current["is_day"]))
         except (KeyError, TypeError, ValueError):
             pass
 
