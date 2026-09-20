@@ -9,7 +9,8 @@
             <li><b>Rain sensor</b> - current rain rate and accumulated total.</li>
             <li><b>Text device</b> - configurable status line with rain status,
                 temperature, weather description, wind (Beaufort + direction),
-                and a weather icon (emoji).</li>
+                and a weather icon (embedded SVG image, fixed size for
+                consistent day/night rendering).</li>
             <li><b>Temperature device</b> - current temperature from Open-Meteo.</li>
         </ul>
         <p>Weather icons are resolved in order: WMO weather code (Open-Meteo) ->
@@ -60,6 +61,7 @@ import re
 import json
 import html
 import time
+import base64
 import urllib.request
 import urllib.error
 import threading
@@ -96,25 +98,107 @@ LANGUAGE_TEXTS = {
     },
 }
 
+# Values are (shape_key, color) pairs; shape_key indexes into ICON_SVG_SHAPES
+# below and is rendered as a fixed-size embedded SVG image, so every icon
+# is pixel-identical in size regardless of the client's emoji font.
 WEATHER_ICON_MAP = {
-    "a": {"day": ("&#x2600;",  "#FFC107"), "night": ("&#x1F319;", "#4A6FA5")},  # onbewolkt/zonnig/helder
-    "j": {"day": ("&#x26C5;",  "#FFC107"), "night": ("&#x1F319;&#x2601;", "#4A6FA5")},  # opklaringen + hoge bewolking
-    "b": {"day": ("&#x26C5;",  "#FFC107"), "night": ("&#x1F319;&#x2601;", "#4A6FA5")},  # opklaringen + middelbare/lage bewolking
-    "c": {"day": ("&#x2601;",  "#D3D3D3"), "night": ("&#x2601;",  "#D3D3D3")},  # zwaar bewolkt
-    "d": {"day": ("&#x1F32B;", "#B0B0B0"), "night": ("&#x1F32B;", "#B0B0B0")},  # bewolkt + lokaal mist
-    "f": {"day": ("&#x1F326;", "#5DADE2"), "night": ("&#x1F327;", "#5DADE2")},  # afwisselend bewolkt + lichte regen
-    "g": {"day": ("&#x26A1;",  "#FFC107"), "night": ("&#x26A1;",  "#FFC107")},  # opklaringen + kans op onweersbuien
-    "s": {"day": ("&#x26A1;",  "#FFC107"), "night": ("&#x26A1;",  "#FFC107")},  # bewolkt + kans op onweersbuien
-    "t": {"day": ("&#x2744;",  "#E0F7FA"), "night": ("&#x2744;",  "#E0F7FA")},  # zware sneeuwval
-    "m": {"day": ("&#x1F327;", "#4FC3F7"), "night": ("&#x1F327;", "#4FC3F7")},  # zwaar bewolkt + lichte regen
-    "n": {"day": ("&#x1F32B;", "#B0B0B0"), "night": ("&#x1F32B;", "#B0B0B0")},  # opklaring + lokale nevel/mist
-    "q": {"day": ("&#x1F327;", "#3B82C4"), "night": ("&#x1F327;", "#3B82C4")},  # zwaar bewolkt en regen
-    "u": {"day": ("&#x2744;",  "#E0F7FA"), "night": ("&#x2744;",  "#E0F7FA")},  # afwisselend bewolkt + lichte sneeuw
-    "v": {"day": ("&#x2744;",  "#E0F7FA"), "night": ("&#x2744;",  "#E0F7FA")},  # zwaar bewolkt + lichte sneeuw
-    "w": {"day": ("&#x1F327;", "#7FB3D5"), "night": ("&#x1F327;", "#7FB3D5")},  # zwaar bewolkt + regen/winterse neerslag
+    "a": {"day": ("sun",            "#FFC107"), "night": ("moon",       "#4A6FA5")},  # onbewolkt/zonnig/helder
+    "j": {"day": ("sun_cloud",      "#FFC107"), "night": ("moon_cloud", "#4A6FA5")},  # opklaringen + hoge bewolking
+    "b": {"day": ("sun_cloud",      "#FFC107"), "night": ("moon_cloud", "#4A6FA5")},  # opklaringen + middelbare/lage bewolking
+    "c": {"day": ("cloud",          "#D3D3D3"), "night": ("cloud",      "#D3D3D3")},  # zwaar bewolkt
+    "d": {"day": ("fog",            "#B0B0B0"), "night": ("fog",        "#B0B0B0")},  # bewolkt + lokaal mist
+    "f": {"day": ("sun_rain_cloud", "#5DADE2"), "night": ("rain_cloud", "#5DADE2")},  # afwisselend bewolkt + lichte regen
+    "g": {"day": ("lightning",      "#FFC107"), "night": ("lightning",  "#FFC107")},  # opklaringen + kans op onweersbuien
+    "s": {"day": ("lightning",      "#FFC107"), "night": ("lightning",  "#FFC107")},  # bewolkt + kans op onweersbuien
+    "t": {"day": ("snow",           "#E0F7FA"), "night": ("snow",       "#E0F7FA")},  # zware sneeuwval
+    "m": {"day": ("rain_cloud",     "#4FC3F7"), "night": ("rain_cloud", "#4FC3F7")},  # zwaar bewolkt + lichte regen
+    "n": {"day": ("fog",            "#B0B0B0"), "night": ("fog",        "#B0B0B0")},  # opklaring + lokale nevel/mist
+    "q": {"day": ("rain_cloud",     "#3B82C4"), "night": ("rain_cloud", "#3B82C4")},  # zwaar bewolkt en regen
+    "u": {"day": ("snow",           "#E0F7FA"), "night": ("snow",       "#E0F7FA")},  # afwisselend bewolkt + lichte sneeuw
+    "v": {"day": ("snow",           "#E0F7FA"), "night": ("snow",       "#E0F7FA")},  # zwaar bewolkt + lichte sneeuw
+    "w": {"day": ("rain_cloud",     "#7FB3D5"), "night": ("rain_cloud", "#7FB3D5")},  # zwaar bewolkt + regen/winterse neerslag
 }
-DEFAULT_ICON = ("&#x2601;", "#D3D3D3")
+DEFAULT_ICON = ("cloud", "#D3D3D3")
 GREEN_DOT = '<span style="color:green;">&#9679;</span>'
+
+ICON_SIZE_PX = 30
+
+# Flat, single-color SVG shapes (24x24 viewBox). {color} is substituted at
+# render time so the same shape can be reused across severities/hues.
+ICON_SVG_SHAPES = {
+    "sun": (
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>"
+        "<g fill='{color}'><circle cx='12' cy='12' r='4.6'/>"
+        "<g stroke='{color}' stroke-width='1.8' stroke-linecap='round'>"
+        "<line x1='12' y1='1.5' x2='12' y2='4.2'/><line x1='12' y1='19.8' x2='12' y2='22.5'/>"
+        "<line x1='1.5' y1='12' x2='4.2' y2='12'/><line x1='19.8' y1='12' x2='22.5' y2='12'/>"
+        "<line x1='4.5' y1='4.5' x2='6.4' y2='6.4'/><line x1='17.6' y1='17.6' x2='19.5' y2='19.5'/>"
+        "<line x1='4.5' y1='19.5' x2='6.4' y2='17.6'/><line x1='17.6' y1='6.4' x2='19.5' y2='4.5'/>"
+        "</g></g></svg>"
+    ),
+    "moon": (
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>"
+        "<path fill='{color}' d='M20.7 15.4A9 9 0 1 1 8.6 3.3a7.2 7.2 0 0 0 12.1 12.1Z'/></svg>"
+    ),
+    "cloud": (
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>"
+        "<path fill='{color}' d='M7.5 18a4.5 4.5 0 0 1-.7-8.94A6 6 0 0 1 18.3 8.1 4.25 4.25 0 0 1 17.5 18h-10Z'/></svg>"
+    ),
+    "sun_cloud": (
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>"
+        "<g fill='{color}'><circle cx='8' cy='7.5' r='3.6'/>"
+        "<g stroke='{color}' stroke-width='1.6' stroke-linecap='round'>"
+        "<line x1='8' y1='1' x2='8' y2='2.6'/><line x1='2.2' y1='7.5' x2='3.8' y2='7.5'/>"
+        "<line x1='3.6' y1='3.1' x2='4.7' y2='4.2'/><line x1='12.4' y1='3.1' x2='11.3' y2='4.2'/>"
+        "</g><path d='M9 19a4.3 4.3 0 0 1-.7-8.5A5.6 5.6 0 0 1 19 9.6 4 4 0 0 1 18.3 19H9Z'/></g></svg>"
+    ),
+    "moon_cloud": (
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>"
+        "<g fill='{color}'><path d='M12.9 9.6A6 6 0 0 1 7 2.4a6 6 0 1 0 6.9 8.3 6 6 0 0 1-1-1.1Z'/>"
+        "<path d='M9 19a4.3 4.3 0 0 1-.7-8.5A5.6 5.6 0 0 1 19 9.6 4 4 0 0 1 18.3 19H9Z'/></g></svg>"
+    ),
+    "fog": (
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>"
+        "<g fill='none' stroke='{color}' stroke-width='1.8' stroke-linecap='round'>"
+        "<path fill='{color}' stroke='none' d='M7.5 12a4 4 0 0 1-.5-7.96A5.3 5.3 0 0 1 17.3 5.3 3.8 3.8 0 0 1 17 13H7.5Z'/>"
+        "<line x1='3' y1='16.5' x2='21' y2='16.5'/><line x1='3' y1='20' x2='18' y2='20'/></g></svg>"
+    ),
+    "rain_cloud": (
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>"
+        "<g fill='{color}'><path d='M7 15a4 4 0 0 1-.5-7.96A5.3 5.3 0 0 1 16.8 8.3 3.8 3.8 0 0 1 16.5 16H7Z'/>"
+        "<g stroke='{color}' stroke-width='1.8' stroke-linecap='round'>"
+        "<line x1='8' y1='18' x2='7' y2='21'/><line x1='12.5' y1='18' x2='11.5' y2='21'/>"
+        "<line x1='17' y1='18' x2='16' y2='21'/></g></g></svg>"
+    ),
+    "sun_rain_cloud": (
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>"
+        "<g fill='{color}'><circle cx='7.5' cy='6.5' r='3'/>"
+        "<g stroke='{color}' stroke-width='1.4' stroke-linecap='round'>"
+        "<line x1='7.5' y1='1.2' x2='7.5' y2='2.6'/><line x1='2.5' y1='6.5' x2='3.9' y2='6.5'/>"
+        "<line x1='3.4' y1='2.9' x2='4.4' y2='3.9'/></g>"
+        "<path d='M9 15a4 4 0 0 1-.4-7.96A5.4 5.4 0 0 1 18.6 8.2 3.8 3.8 0 0 1 18.3 16H9Z'/>"
+        "<g stroke='{color}' stroke-width='1.8' stroke-linecap='round'>"
+        "<line x1='10' y1='18' x2='9' y2='21'/><line x1='14.5' y1='18' x2='13.5' y2='21'/></g></g></svg>"
+    ),
+    "snow": (
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>"
+        "<g stroke='{color}' stroke-width='1.8' stroke-linecap='round'>"
+        "<line x1='12' y1='2' x2='12' y2='22'/><line x1='3.3' y1='7' x2='20.7' y2='17'/>"
+        "<line x1='3.3' y1='17' x2='20.7' y2='7'/></g></svg>"
+    ),
+    "lightning": (
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>"
+        "<path fill='{color}' d='M13 2 4 14h6l-1 8 9-12h-6l1-8Z'/></svg>"
+    ),
+}
+
+def icon_shape_to_data_uri(shape: str, color: str) -> str:
+    template = ICON_SVG_SHAPES.get(shape)
+    if not template:
+        return ""
+    svg = template.format(color=color)
+    encoded = base64.b64encode(svg.encode("utf-8")).decode("ascii")
+    return f"data:image/svg+xml;base64,{encoded}"
 
 WMO_DESCRIPTIONS = {
     0:  "Onbewolkt",
@@ -184,43 +268,43 @@ WMO_DESCRIPTIONS_BY_LANG = {
 }
 
 WMO_ICON_MAP = {
-    0:  ("&#x2600;",  "#FFC107"),  # onbewolkt
-    1:  ("&#x26C5;",  "#FFC107"),  # hoofdzakelijk helder
-    2:  ("&#x26C5;",  "#FFC107"),  # gedeeltelijk bewolkt
-    3:  ("&#x2601;",  "#D3D3D3"),  # bewolkt
-    45: ("&#x1F32B;", "#B0B0B0"),  # mist
-    48: ("&#x1F32B;", "#B0B0B0"),  # ijsmist
-    51: ("&#x1F327;", "#4FC3F7"),  # motregen licht
-    53: ("&#x1F327;", "#4FC3F7"),  # motregen matig
-    55: ("&#x1F327;", "#4FC3F7"),  # motregen zwaar
-    56: ("&#x1F327;", "#7FB3D5"),  # ijzel
-    57: ("&#x1F327;", "#7FB3D5"),  # ijzel
-    61: ("&#x1F327;", "#4FC3F7"),  # lichte regen
-    63: ("&#x1F327;", "#3B82C4"),  # regen
-    65: ("&#x1F327;", "#3B82C4"),  # zware regen
-    66: ("&#x1F327;", "#7FB3D5"),  # ijzel
-    67: ("&#x1F327;", "#7FB3D5"),  # ijzel
-    71: ("&#x2744;",  "#E0F7FA"),  # lichte sneeuw
-    73: ("&#x2744;",  "#E0F7FA"),  # sneeuw
-    75: ("&#x2744;",  "#E0F7FA"),  # zware sneeuw
-    77: ("&#x2744;",  "#E0F7FA"),  # sneeuwkorrels
-    80: ("&#x1F327;", "#5DADE2"),  # lichte bui
-    81: ("&#x1F327;", "#5DADE2"),  # bui
-    82: ("&#x1F327;", "#3B82C4"),  # zware bui
-    85: ("&#x2744;",  "#E0F7FA"),  # lichte sneeuwbui
-    86: ("&#x2744;",  "#E0F7FA"),  # zware sneeuwbui
-    95: ("&#x26A1;",  "#FFC107"),  # onweer
-    96: ("&#x26A1;",  "#FFC107"),  # onweer met hagel
-    99: ("&#x26A1;",  "#FFC107"),  # onweer met zware hagel
+    0:  ("sun",        "#FFC107"),  # onbewolkt
+    1:  ("sun_cloud",  "#FFC107"),  # hoofdzakelijk helder
+    2:  ("sun_cloud",  "#FFC107"),  # gedeeltelijk bewolkt
+    3:  ("cloud",      "#D3D3D3"),  # bewolkt
+    45: ("fog",        "#B0B0B0"),  # mist
+    48: ("fog",        "#B0B0B0"),  # ijsmist
+    51: ("rain_cloud", "#4FC3F7"),  # motregen licht
+    53: ("rain_cloud", "#4FC3F7"),  # motregen matig
+    55: ("rain_cloud", "#4FC3F7"),  # motregen zwaar
+    56: ("rain_cloud", "#7FB3D5"),  # ijzel
+    57: ("rain_cloud", "#7FB3D5"),  # ijzel
+    61: ("rain_cloud", "#4FC3F7"),  # lichte regen
+    63: ("rain_cloud", "#3B82C4"),  # regen
+    65: ("rain_cloud", "#3B82C4"),  # zware regen
+    66: ("rain_cloud", "#7FB3D5"),  # ijzel
+    67: ("rain_cloud", "#7FB3D5"),  # ijzel
+    71: ("snow",       "#E0F7FA"),  # lichte sneeuw
+    73: ("snow",       "#E0F7FA"),  # sneeuw
+    75: ("snow",       "#E0F7FA"),  # zware sneeuw
+    77: ("snow",       "#E0F7FA"),  # sneeuwkorrels
+    80: ("rain_cloud", "#5DADE2"),  # lichte bui
+    81: ("rain_cloud", "#5DADE2"),  # bui
+    82: ("rain_cloud", "#3B82C4"),  # zware bui
+    85: ("snow",       "#E0F7FA"),  # lichte sneeuwbui
+    86: ("snow",       "#E0F7FA"),  # zware sneeuwbui
+    95: ("lightning",  "#FFC107"),  # onweer
+    96: ("lightning",  "#FFC107"),  # onweer met hagel
+    99: ("lightning",  "#FFC107"),  # onweer met zware hagel
 }
 
 # Night-time overrides for the WMO codes whose icon differs after dark
 # (clear/mostly clear/partly cloudy); every other code looks the same
 # day or night, same as WEATHER_ICON_MAP above.
 WMO_ICON_MAP_NIGHT = {
-    0: ("&#x1F319;",         "#4A6FA5"),  # onbewolkt/helder
-    1: ("&#x1F319;&#x2601;", "#4A6FA5"),  # hoofdzakelijk helder
-    2: ("&#x1F319;&#x2601;", "#4A6FA5"),  # gedeeltelijk bewolkt
+    0: ("moon",       "#4A6FA5"),  # onbewolkt/helder
+    1: ("moon_cloud", "#4A6FA5"),  # hoofdzakelijk helder
+    2: ("moon_cloud", "#4A6FA5"),  # gedeeltelijk bewolkt
 }
 
 _BEAUFORT_THRESHOLDS = [1, 6, 12, 20, 29, 39, 50, 62, 75, 89, 103, 118]
@@ -418,27 +502,27 @@ def map_icon_from_code(code: str) -> Optional[Tuple[str, str]]:
         return None
     return entry["night"] if is_night else entry["day"]
 
-def map_weather_icon_entity(weatherdescription: str) -> Tuple[str, str]:
+def map_weather_icon_shape(weatherdescription: str, is_day: bool = True) -> Tuple[str, str]:
     desc = weatherdescription.lower()
 
     if "onweer" in desc or "bliksem" in desc:
-        return "&#x26A1;", "#FFC107"
+        return "lightning", "#FFC107"
     if "hagel" in desc:
-        return "&#x2744;", "#E0F7FA"
+        return "snow", "#E0F7FA"
     if "sneeuw" in desc:
-        return "&#x2744;", "#E0F7FA"
+        return "snow", "#E0F7FA"
     if "mist" in desc or "nevel" in desc:
-        return "&#x1F32B;", "#B0B0B0"
+        return "fog", "#B0B0B0"
     if "bui" in desc:
-        return "&#x1F327;", "#5DADE2"
+        return "rain_cloud", "#5DADE2"
     if "motregen" in desc or "regen" in desc:
-        return "&#x1F327;", "#4FC3F7"
+        return "rain_cloud", "#4FC3F7"
     if "onbewolkt" in desc or "zonnig" in desc or "helder" in desc:
-        return "&#x2600;", "#FFC107"
+        return ("sun", "#FFC107") if is_day else ("moon", "#4A6FA5")
     if "gedeeltelijk bewolkt" in desc or "opklaringen" in desc:
-        return "&#x26C5;", "#FFC107"
+        return ("sun_cloud", "#FFC107") if is_day else ("moon_cloud", "#4A6FA5")
     if "bewolkt" in desc:
-        return "&#x2601;", "#D3D3D3"
+        return "cloud", "#D3D3D3"
 
     return DEFAULT_ICON
 
@@ -457,16 +541,18 @@ def build_weather_icon_html(weather_info: Optional[dict]) -> str:
             wmo_icon = WMO_ICON_MAP_NIGHT.get(wmo_code)
         wmo_icon = wmo_icon or WMO_ICON_MAP.get(wmo_code)
 
-    icon_entity, color = (
+    icon_shape, color = (
         wmo_icon
         or map_icon_from_code(extract_icon_code(iconurl))
-        or (map_weather_icon_entity(weatherdescription) if weatherdescription else DEFAULT_ICON)
+        or (map_weather_icon_shape(weatherdescription, is_day) if weatherdescription else DEFAULT_ICON)
     )
+    data_uri = icon_shape_to_data_uri(icon_shape, color)
+    if not data_uri:
+        return ""
     alt = html.escape(weatherdescription or "weather", quote=True)
 
-    return (f'<span title="{alt}" style="vertical-align: middle; color: {color}; '
-            f'font-size: 2em; line-height: 1;">'
-            f'{icon_entity}</span>')
+    return (f'<img src="{data_uri}" width="{ICON_SIZE_PX}" height="{ICON_SIZE_PX}" '
+            f'alt="{alt}" title="{alt}" style="vertical-align: middle;">')
 
 def build_weather_suffix(weather_info: Optional[dict], text_mode: str) -> Tuple[str, str]:
     if not weather_info:
