@@ -1,8 +1,8 @@
 """
-<plugin key="WeatherInfo" name="Weather Info" author="MadPatrick" version="1.3.1" externallink="https://buienradar.nl" wikilink="https://github.com/MadPatrick/domoticz_rainforecast">
+<plugin key="WeatherInfo" name="Weather Info" author="MadPatrick" version="1.3.2" externallink="https://buienradar.nl" wikilink="https://github.com/MadPatrick/domoticz_rainforecast">
     <description>
         <h2>Weather Info (Buienradar + Open-Meteo)</h2>
-        <p><strong>Version:</strong> 1.3.1</p>
+        <p><strong>Version:</strong> 1.3.2</p>
         <p>Retrieves the upcoming rainfall forecast from Buienradar and current weather
         conditions from Open-Meteo, and updates three Domoticz devices:</p>
         <ul>
