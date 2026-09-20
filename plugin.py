@@ -9,8 +9,7 @@
             <li><b>Rain sensor</b> - current rain rate and accumulated total.</li>
             <li><b>Text device</b> - configurable status line with rain status,
                 temperature, weather description, wind (Beaufort + direction),
-                and a weather icon (embedded SVG image, fixed size for
-                consistent day/night rendering).</li>
+                and a weather icon (emoji).</li>
             <li><b>Temperature device</b> - current temperature from Open-Meteo.</li>
         </ul>
         <p>Weather icons are resolved in order: WMO weather code (Open-Meteo) ->
@@ -61,7 +60,6 @@ import re
 import json
 import html
 import time
-import base64
 import urllib.request
 import urllib.error
 import threading
@@ -98,9 +96,10 @@ LANGUAGE_TEXTS = {
     },
 }
 
-# Values are (shape_key, color) pairs; shape_key indexes into ICON_SVG_SHAPES
-# below and is rendered as a fixed-size embedded SVG image, so every icon
-# is pixel-identical in size regardless of the client's emoji font.
+# Values are (shape_key, color) pairs; shape_key indexes into ICON_ENTITIES
+# below. Domoticz's Text device strips <img>/data-URI content from the
+# value, so icons have to stay plain Unicode - see ICON_ENTITIES for how
+# consistent sizing is achieved without images.
 WEATHER_ICON_MAP = {
     "a": {"day": ("sun",            "#FFC107"), "night": ("moon",       "#4A6FA5")},  # onbewolkt/zonnig/helder
     "j": {"day": ("sun_cloud",      "#FFC107"), "night": ("moon_cloud", "#4A6FA5")},  # opklaringen + hoge bewolking
@@ -121,84 +120,23 @@ WEATHER_ICON_MAP = {
 DEFAULT_ICON = ("cloud", "#D3D3D3")
 GREEN_DOT = '<span style="color:green;">&#9679;</span>'
 
-ICON_SIZE_PX = 30
-
-# Flat, single-color SVG shapes (24x24 viewBox). {color} is substituted at
-# render time so the same shape can be reused across severities/hues.
-ICON_SVG_SHAPES = {
-    "sun": (
-        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>"
-        "<g fill='{color}'><circle cx='12' cy='12' r='4.6'/>"
-        "<g stroke='{color}' stroke-width='1.8' stroke-linecap='round'>"
-        "<line x1='12' y1='1.5' x2='12' y2='4.2'/><line x1='12' y1='19.8' x2='12' y2='22.5'/>"
-        "<line x1='1.5' y1='12' x2='4.2' y2='12'/><line x1='19.8' y1='12' x2='22.5' y2='12'/>"
-        "<line x1='4.5' y1='4.5' x2='6.4' y2='6.4'/><line x1='17.6' y1='17.6' x2='19.5' y2='19.5'/>"
-        "<line x1='4.5' y1='19.5' x2='6.4' y2='17.6'/><line x1='17.6' y1='6.4' x2='19.5' y2='4.5'/>"
-        "</g></g></svg>"
-    ),
-    "moon": (
-        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>"
-        "<path fill='{color}' d='M20.7 15.4A9 9 0 1 1 8.6 3.3a7.2 7.2 0 0 0 12.1 12.1Z'/></svg>"
-    ),
-    "cloud": (
-        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>"
-        "<path fill='{color}' d='M7.5 18a4.5 4.5 0 0 1-.7-8.94A6 6 0 0 1 18.3 8.1 4.25 4.25 0 0 1 17.5 18h-10Z'/></svg>"
-    ),
-    "sun_cloud": (
-        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>"
-        "<g fill='{color}'><circle cx='8' cy='7.5' r='3.6'/>"
-        "<g stroke='{color}' stroke-width='1.6' stroke-linecap='round'>"
-        "<line x1='8' y1='1' x2='8' y2='2.6'/><line x1='2.2' y1='7.5' x2='3.8' y2='7.5'/>"
-        "<line x1='3.6' y1='3.1' x2='4.7' y2='4.2'/><line x1='12.4' y1='3.1' x2='11.3' y2='4.2'/>"
-        "</g><path d='M9 19a4.3 4.3 0 0 1-.7-8.5A5.6 5.6 0 0 1 19 9.6 4 4 0 0 1 18.3 19H9Z'/></g></svg>"
-    ),
-    "moon_cloud": (
-        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>"
-        "<g fill='{color}'><path d='M12.9 9.6A6 6 0 0 1 7 2.4a6 6 0 1 0 6.9 8.3 6 6 0 0 1-1-1.1Z'/>"
-        "<path d='M9 19a4.3 4.3 0 0 1-.7-8.5A5.6 5.6 0 0 1 19 9.6 4 4 0 0 1 18.3 19H9Z'/></g></svg>"
-    ),
-    "fog": (
-        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>"
-        "<g fill='none' stroke='{color}' stroke-width='1.8' stroke-linecap='round'>"
-        "<path fill='{color}' stroke='none' d='M7.5 12a4 4 0 0 1-.5-7.96A5.3 5.3 0 0 1 17.3 5.3 3.8 3.8 0 0 1 17 13H7.5Z'/>"
-        "<line x1='3' y1='16.5' x2='21' y2='16.5'/><line x1='3' y1='20' x2='18' y2='20'/></g></svg>"
-    ),
-    "rain_cloud": (
-        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>"
-        "<g fill='{color}'><path d='M7 15a4 4 0 0 1-.5-7.96A5.3 5.3 0 0 1 16.8 8.3 3.8 3.8 0 0 1 16.5 16H7Z'/>"
-        "<g stroke='{color}' stroke-width='1.8' stroke-linecap='round'>"
-        "<line x1='8' y1='18' x2='7' y2='21'/><line x1='12.5' y1='18' x2='11.5' y2='21'/>"
-        "<line x1='17' y1='18' x2='16' y2='21'/></g></g></svg>"
-    ),
-    "sun_rain_cloud": (
-        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>"
-        "<g fill='{color}'><circle cx='7.5' cy='6.5' r='3'/>"
-        "<g stroke='{color}' stroke-width='1.4' stroke-linecap='round'>"
-        "<line x1='7.5' y1='1.2' x2='7.5' y2='2.6'/><line x1='2.5' y1='6.5' x2='3.9' y2='6.5'/>"
-        "<line x1='3.4' y1='2.9' x2='4.4' y2='3.9'/></g>"
-        "<path d='M9 15a4 4 0 0 1-.4-7.96A5.4 5.4 0 0 1 18.6 8.2 3.8 3.8 0 0 1 18.3 16H9Z'/>"
-        "<g stroke='{color}' stroke-width='1.8' stroke-linecap='round'>"
-        "<line x1='10' y1='18' x2='9' y2='21'/><line x1='14.5' y1='18' x2='13.5' y2='21'/></g></g></svg>"
-    ),
-    "snow": (
-        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>"
-        "<g stroke='{color}' stroke-width='1.8' stroke-linecap='round'>"
-        "<line x1='12' y1='2' x2='12' y2='22'/><line x1='3.3' y1='7' x2='20.7' y2='17'/>"
-        "<line x1='3.3' y1='17' x2='20.7' y2='7'/></g></svg>"
-    ),
-    "lightning": (
-        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>"
-        "<path fill='{color}' d='M13 2 4 14h6l-1 8 9-12h-6l1-8Z'/></svg>"
-    ),
+# U+FE0F (VARIATION SELECTOR-16) forces full-color "emoji presentation" for
+# codepoints that otherwise default to a small monochrome "text presentation"
+# glyph in most fonts (sun/cloud/lightning/snowflake are legacy dingbat
+# symbols, unlike the moon/rain-cloud/fog pictographs which are already
+# emoji-only). Without it, the moon rendered noticeably larger than the sun.
+ICON_ENTITIES = {
+    "sun":            "&#x2600;&#xFE0F;",
+    "moon":           "&#x1F319;&#xFE0F;",
+    "cloud":          "&#x2601;&#xFE0F;",
+    "sun_cloud":      "&#x26C5;&#xFE0F;",
+    "moon_cloud":     "&#x1F319;&#xFE0F;&#x2601;&#xFE0F;",
+    "fog":            "&#x1F32B;&#xFE0F;",
+    "rain_cloud":     "&#x1F327;&#xFE0F;",
+    "sun_rain_cloud": "&#x1F326;&#xFE0F;",
+    "snow":           "&#x2744;&#xFE0F;",
+    "lightning":      "&#x26A1;&#xFE0F;",
 }
-
-def icon_shape_to_data_uri(shape: str, color: str) -> str:
-    template = ICON_SVG_SHAPES.get(shape)
-    if not template:
-        return ""
-    svg = template.format(color=color)
-    encoded = base64.b64encode(svg.encode("utf-8")).decode("ascii")
-    return f"data:image/svg+xml;base64,{encoded}"
 
 WMO_DESCRIPTIONS = {
     0:  "Onbewolkt",
@@ -546,13 +484,14 @@ def build_weather_icon_html(weather_info: Optional[dict]) -> str:
         or map_icon_from_code(extract_icon_code(iconurl))
         or (map_weather_icon_shape(weatherdescription, is_day) if weatherdescription else DEFAULT_ICON)
     )
-    data_uri = icon_shape_to_data_uri(icon_shape, color)
-    if not data_uri:
+    icon_entity = ICON_ENTITIES.get(icon_shape)
+    if not icon_entity:
         return ""
     alt = html.escape(weatherdescription or "weather", quote=True)
 
-    return (f'<img src="{data_uri}" width="{ICON_SIZE_PX}" height="{ICON_SIZE_PX}" '
-            f'alt="{alt}" title="{alt}" style="vertical-align: middle;">')
+    return (f'<span title="{alt}" style="vertical-align: middle; color: {color}; '
+            f'font-size: 2em; line-height: 1;">'
+            f'{icon_entity}</span>')
 
 def build_weather_suffix(weather_info: Optional[dict], text_mode: str) -> Tuple[str, str]:
     if not weather_info:
