@@ -6,7 +6,17 @@ It updates 3 devices automatically.
 ## What does this plugin do
 
 The plugin reads the Buienradar `raintext` feed based on latitude/longitude and
-adds weather details from the Buienradar JSON feed.
+adds the current weather from the Buienradar JSON feed
+(`https://data.buienradar.nl/2.0/feed/json`), so all data comes from one source.
+The weather is taken from the nearest Buienradar weather station (within 75 km;
+a value that station does not measure comes from the next nearest one) and is
+refreshed every 10 minutes. Buienradar covers the Netherlands: elsewhere only the
+rain status is shown. The NL description is the Buienradar text, the EN
+description is derived from the Buienradar icon.
+
+While the rain radar reports rain right now and the weather station still says
+clear, cloudy or fog, the icon becomes a rain cloud and the description light
+rain, rain or heavy rain (by intensity), so the text stays consistent.
 
 You get:
 - current rain intensity (`mm/h`)
