@@ -1,20 +1,20 @@
 """
-<plugin key="WeatherInfo" name="Weather Info" author="MadPatrick" version="1.3.2" externallink="https://buienradar.nl" wikilink="https://github.com/MadPatrick/domoticz_rainforecast">
+<plugin key="WeatherInfo" name="Weather Info" author="MadPatrick" version="1.4.0" externallink="https://buienradar.nl" wikilink="https://github.com/MadPatrick/domoticz_rainforecast">
     <description>
-        <h2>Weather Info (Buienradar + Open-Meteo)</h2>
-        <p><strong>Version:</strong> 1.3.2</p>
-        <p>Retrieves the upcoming rainfall forecast from Buienradar and current weather
-        conditions from Open-Meteo, and updates three Domoticz devices:</p>
+        <h2>Weather Info (Buienradar)</h2>
+        <p><strong>Version:</strong> 1.4.0</p>
+        <p>Retrieves the upcoming rainfall forecast and the current weather conditions
+        (nearest weather station) from Buienradar, and updates three Domoticz devices:</p>
         <ul>
             <li><b>Rain sensor</b> - current rain rate and accumulated total.</li>
             <li><b>Text device</b> - configurable status line with rain status,
                 temperature, weather description, wind (Beaufort + direction),
                 and a weather icon (emoji).</li>
-            <li><b>Temperature device</b> - current temperature from Open-Meteo.</li>
+            <li><b>Temperature device</b> - current temperature of the nearest Buienradar weather station.</li>
         </ul>
-        <p>Weather icons are resolved in order: WMO weather code (Open-Meteo) ->
-        Buienradar icon code -> weather description text as a last fallback.
-        Coordinates default to the Domoticz location settings when left blank.</p>
+        <p>Weather icons are resolved in order: Buienradar icon code -> weather
+        description text as a last fallback. While the rain radar reports rain, a dry
+        icon/description becomes rain. Coordinates default to the Domoticz location settings when left blank.</p>
     </description>
     <params>
         <param field="Latitude" label="Latitude (lat)"  width="80px" default="">
@@ -62,17 +62,15 @@ import html
 import time
 import urllib.request
 import urllib.error
+import math
 import threading
 import queue
 from typing import Optional, Tuple
 
 BUIENRADAR_URL = "https://gpsgadget.buienradar.nl/data/raintext?lat={lat}&lon={lon}"
-OPEN_METEO_URL = (
-    "https://api.open-meteo.com/v1/forecast?"
-    "latitude={lat}&longitude={lon}"
-    "&current=temperature_2m,wind_speed_10m,wind_direction_10m,weather_code,is_day"
-)
-POLL_OPENMETEO = 15          # fetch Open-Meteo once every N minutes (independent of PollInterval)
+BUIENRADAR_FEED_URL = "https://data.buienradar.nl/2.0/feed/json"
+POLL_WEATHER = 10            # fetch the station feed once every N minutes (stations report every 10 min)
+MAX_STATION_KM = 75          # use the nearest station within this distance
 UNIT_RAIN = 1
 UNIT_TEXT = 2
 UNIT_TEMP = 3
@@ -138,120 +136,20 @@ ICON_ENTITIES = {
     "lightning":      "&#x26A1;&#xFE0F;",
 }
 
-WMO_DESCRIPTIONS = {
-    0:  "Onbewolkt",
-    1:  "Hoofdzakelijk helder",
-    2:  "Gedeeltelijk bewolkt",
-    3:  "Bewolkt",
-    45: "Mist",
-    48: "IJsmist",
-    51: "Motregen",
-    53: "Motregen",
-    55: "Motregen",
-    56: "IJzel",
-    57: "IJzel",
-    61: "Lichte regen",
-    63: "Regen",
-    65: "Zware regen",
-    66: "IJzel",
-    67: "IJzel",
-    71: "Lichte sneeuw",
-    73: "Sneeuw",
-    75: "Zware sneeuw",
-    77: "Sneeuwkorrels",
-    80: "Lichte bui",
-    81: "Bui",
-    82: "Zware bui",
-    85: "Lichte sneeuwbui",
-    86: "Zware sneeuwbui",
-    95: "Onweer",
-    96: "Onweer met hagel",
-    99: "Onweer met zware hagel",
+# English descriptions by Buienradar icon letter (the feed text is Dutch).
+WEATHER_DESCRIPTIONS_EN = {
+    "a": "Clear", "b": "Partly cloudy", "j": "Partly cloudy", "c": "Cloudy",
+    "d": "Fog", "n": "Fog", "f": "Light rain", "m": "Light rain",
+    "q": "Rain", "w": "Rain", "g": "Thunderstorms possible",
+    "s": "Thunderstorms possible", "t": "Heavy snow", "u": "Light snow",
+    "v": "Light snow",
 }
-
-WMO_DESCRIPTIONS_EN = {
-    0:  "Clear",
-    1:  "Mainly clear",
-    2:  "Partly cloudy",
-    3:  "Cloudy",
-    45: "Fog",
-    48: "Rime fog",
-    51: "Drizzle",
-    53: "Drizzle",
-    55: "Drizzle",
-    56: "Freezing drizzle",
-    57: "Freezing drizzle",
-    61: "Light rain",
-    63: "Rain",
-    65: "Heavy rain",
-    66: "Freezing rain",
-    67: "Freezing rain",
-    71: "Light snow",
-    73: "Snow",
-    75: "Heavy snow",
-    77: "Snow grains",
-    80: "Light showers",
-    81: "Showers",
-    82: "Heavy showers",
-    85: "Light snow showers",
-    86: "Heavy snow showers",
-    95: "Thunderstorm",
-    96: "Thunderstorm with hail",
-    99: "Thunderstorm with heavy hail",
+RAIN_DESCRIPTIONS = {
+    "NL": ("Lichte regen", "Regen", "Zware regen"),
+    "EN": ("Light rain", "Rain", "Heavy rain"),
 }
-
-WMO_DESCRIPTIONS_BY_LANG = {
-    "NL": WMO_DESCRIPTIONS,
-    "EN": WMO_DESCRIPTIONS_EN,
-}
-
-WMO_ICON_MAP = {
-    0:  ("sun",        "#FFC107"),  # onbewolkt
-    1:  ("sun_cloud",  "#FFC107"),  # hoofdzakelijk helder
-    2:  ("sun_cloud",  "#FFC107"),  # gedeeltelijk bewolkt
-    3:  ("cloud",      "#D3D3D3"),  # bewolkt
-    45: ("fog",        "#B0B0B0"),  # mist
-    48: ("fog",        "#B0B0B0"),  # ijsmist
-    51: ("rain_cloud", "#4FC3F7"),  # motregen licht
-    53: ("rain_cloud", "#4FC3F7"),  # motregen matig
-    55: ("rain_cloud", "#4FC3F7"),  # motregen zwaar
-    56: ("rain_cloud", "#7FB3D5"),  # ijzel
-    57: ("rain_cloud", "#7FB3D5"),  # ijzel
-    61: ("rain_cloud", "#4FC3F7"),  # lichte regen
-    63: ("rain_cloud", "#3B82C4"),  # regen
-    65: ("rain_cloud", "#3B82C4"),  # zware regen
-    66: ("rain_cloud", "#7FB3D5"),  # ijzel
-    67: ("rain_cloud", "#7FB3D5"),  # ijzel
-    71: ("snow",       "#E0F7FA"),  # lichte sneeuw
-    73: ("snow",       "#E0F7FA"),  # sneeuw
-    75: ("snow",       "#E0F7FA"),  # zware sneeuw
-    77: ("snow",       "#E0F7FA"),  # sneeuwkorrels
-    80: ("rain_cloud", "#5DADE2"),  # lichte bui
-    81: ("rain_cloud", "#5DADE2"),  # bui
-    82: ("rain_cloud", "#3B82C4"),  # zware bui
-    85: ("snow",       "#E0F7FA"),  # lichte sneeuwbui
-    86: ("snow",       "#E0F7FA"),  # zware sneeuwbui
-    95: ("lightning",  "#FFC107"),  # onweer
-    96: ("lightning",  "#FFC107"),  # onweer met hagel
-    99: ("lightning",  "#FFC107"),  # onweer met zware hagel
-}
-
-# Night-time overrides for the WMO codes whose icon differs after dark
-# (clear/mostly clear/partly cloudy); every other code looks the same
-# day or night, same as WEATHER_ICON_MAP above.
-WMO_ICON_MAP_NIGHT = {
-    0: ("moon",       "#4A6FA5"),  # onbewolkt/helder
-    1: ("moon_cloud", "#4A6FA5"),  # hoofdzakelijk helder
-    2: ("moon_cloud", "#4A6FA5"),  # gedeeltelijk bewolkt
-}
-
-_BEAUFORT_THRESHOLDS = [1, 6, 12, 20, 29, 39, 50, 62, 75, 89, 103, 118]
-
-def kmh_to_beaufort(kmh: float) -> int:
-    for bft, threshold in enumerate(_BEAUFORT_THRESHOLDS):
-        if kmh < threshold:
-            return bft
-    return 12
+DRY_SHAPES = ("sun", "moon", "sun_cloud", "moon_cloud", "cloud", "fog")
+RAIN_ICON = ("rain_cloud", "#4FC3F7")
 
 _COMPASS_DIRS = ["N", "NO", "O", "ZO", "Z", "ZW", "W", "NW"]
 _COMPASS_DIRS_EN = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
@@ -262,7 +160,7 @@ _COMPASS_DIRS_BY_LANG = {
 
 def degrees_to_compass(degrees: float, language: str = "NL") -> str:
     dirs = _COMPASS_DIRS_BY_LANG.get(language, _COMPASS_DIRS)
-    index = int((degrees + 22.5) / 45) % 8
+    index = int((degrees + 22.5) // 45) % 8
     return dirs[index]
 
 TEXT_DEVICE_MODES = {
@@ -318,8 +216,8 @@ def parse_manual_coordinate(value: Optional[str], label: str) -> Tuple[Optional[
 def http_get_with_retry(url: str, timeout: int = 10, retries: int = 3, retry_delay: float = 3.0) -> str:
     """GET a URL, retrying on transient server errors (5xx) and connection issues.
 
-    Both weather APIs occasionally return 502/503/504 for a few seconds
-    (e.g. Open-Meteo around its hourly model refresh). A short retry with
+    The Buienradar feeds occasionally return 502/503/504 for a few seconds.
+    A short retry with
     backoff resolves those without needing to wait for the next poll cycle.
     """
     attempt = 1
@@ -411,6 +309,79 @@ def parse_buienradar(data: str):
         "first_rain_at": first_rain_at,
     }
 
+def parse_station_feed(raw: str) -> list:
+    """Buienradar JSON feed -> list of weather stations that have a position."""
+    data = json.loads(raw)
+    measurements = (data.get("actual") or {}).get("stationmeasurements")
+    if not isinstance(measurements, list):
+        raise ValueError("no stationmeasurements")
+    stations = []
+    for item in measurements:
+        if not isinstance(item, dict):
+            continue
+        try:
+            station = {"name": re.sub(r"^Meetstation\s+", "", str(item.get("stationname") or "")),
+                       "lat": float(item["lat"]), "lon": float(item["lon"])}
+        except (KeyError, TypeError, ValueError):
+            continue
+        code = extract_icon_code(str(item.get("iconurl") or ""))
+        station["icon_code"] = code if re.fullmatch(r"[a-z]{1,2}", code) else ""
+        station["description"] = str(item.get("weatherdescription") or "").strip()
+        try:
+            station["temperature"] = float(item["temperature"])
+        except (KeyError, TypeError, ValueError):
+            pass
+        try:
+            station["windspeed_bft"] = max(0, min(12, int(item["windspeedBft"])))
+            station["winddegrees"] = float(item["winddirectiondegrees"])
+        except (KeyError, TypeError, ValueError):
+            pass
+        stations.append(station)
+    return stations
+
+def distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    rad = math.pi / 180
+    a = (math.sin((lat2 - lat1) * rad / 2) ** 2
+         + math.cos(lat1 * rad) * math.cos(lat2 * rad) * math.sin((lon2 - lon1) * rad / 2) ** 2)
+    return 6371 * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+def pick_weather_info(stations: list, lat: float, lon: float, language: str,
+                      max_km: float = MAX_STATION_KM) -> Optional[dict]:
+    """Current weather from the nearest station within max_km.
+
+    The nearest station gives description and icon; a value it does not
+    measure (temperature, wind) comes from the nearest station that does.
+    """
+    ranked = sorted(
+        ((distance_km(lat, lon, s["lat"], s["lon"]), s) for s in stations),
+        key=lambda item: item[0],
+    )
+    ranked = [item for item in ranked if item[0] <= max_km]
+    if not ranked:
+        return None
+    nearest = ranked[0][1]
+    code = nearest["icon_code"]
+    letter = code[:1]
+    description = nearest["description"]
+    if language == "EN":
+        description = WEATHER_DESCRIPTIONS_EN.get(letter, description)
+    info = {
+        "station": nearest["name"],
+        "icon_code": code,
+        "weatherdescription": description,
+        "weatherdescription_nl": nearest["description"],
+    }
+    if code:
+        # A doubled letter is the night icon.
+        info["is_day"] = not (len(code) == 2 and code[0] == code[1])
+    for _, station in ranked:
+        if "temperature" not in info and "temperature" in station:
+            info["temperature"] = station["temperature"]
+        if "windspeed_bft" not in info and "windspeed_bft" in station:
+            info["windspeed_bft"] = station["windspeed_bft"]
+            info["winddirection"] = degrees_to_compass(station["winddegrees"], language)
+    return info
+
 def build_wind_text(weather_info: dict) -> str:
     direction = str(weather_info.get("winddirection") or "").strip()
     force = weather_info.get("windspeed_bft")
@@ -464,26 +435,41 @@ def map_weather_icon_shape(weatherdescription: str, is_day: bool = True) -> Tupl
 
     return DEFAULT_ICON
 
+def resolve_weather_icon(weather_info: dict) -> Tuple[str, str]:
+    """(shape, colour) from the Buienradar icon code, else from the description."""
+    override = weather_info.get("icon_override")
+    if override:
+        return override
+    weatherdescription = str(weather_info.get("weatherdescription_nl") or weather_info.get("weatherdescription") or "").strip()
+    is_day = weather_info.get("is_day", True)
+    return (
+        map_icon_from_code(str(weather_info.get("icon_code") or ""))
+        or (map_weather_icon_shape(weatherdescription, is_day) if weatherdescription else DEFAULT_ICON)
+    )
+
+def apply_rain_override(weather_info: Optional[dict], mm_now: float, language: str) -> Optional[dict]:
+    """Make a dry icon/description agree with the rain radar.
+
+    The weather station can be some km away and reports every 10 minutes, the
+    radar shows the rain at the exact location. While the radar reports rain
+    right now and the station still says clear, cloudy or fog, show a rain
+    cloud and light rain / rain / heavy rain (by intensity). Snow and
+    thunderstorms are kept.
+    """
+    if not weather_info or mm_now <= 0:
+        return weather_info
+    if resolve_weather_icon(weather_info)[0] not in DRY_SHAPES:
+        return weather_info
+    level = 0 if mm_now < 2.5 else 1 if mm_now < 7.6 else 2
+    texts = RAIN_DESCRIPTIONS.get(language, RAIN_DESCRIPTIONS["NL"])
+    return dict(weather_info, icon_override=RAIN_ICON, weatherdescription=texts[level])
+
 def build_weather_icon_html(weather_info: Optional[dict]) -> str:
     if not weather_info:
         return ""
 
     weatherdescription = str(weather_info.get("weatherdescription") or "").strip()
-    wmo_code = weather_info.get("wmo_code")
-    is_day = weather_info.get("is_day", True)
-    iconurl = str(weather_info.get("iconurl") or "").strip()
-
-    wmo_icon = None
-    if wmo_code is not None:
-        if not is_day:
-            wmo_icon = WMO_ICON_MAP_NIGHT.get(wmo_code)
-        wmo_icon = wmo_icon or WMO_ICON_MAP.get(wmo_code)
-
-    icon_shape, color = (
-        wmo_icon
-        or map_icon_from_code(extract_icon_code(iconurl))
-        or (map_weather_icon_shape(weatherdescription, is_day) if weatherdescription else DEFAULT_ICON)
-    )
+    icon_shape, color = resolve_weather_icon(weather_info)
     icon_entity = ICON_ENTITIES.get(icon_shape)
     if not icon_entity:
         return ""
@@ -563,8 +549,8 @@ class BasePlugin:
         self._interval  = 10
         self._heartbeat = 30
         self._ticks     = 0
-        self._openmeteo_ticks = 0
-        self._openmeteo_ticks_needed = (POLL_OPENMETEO * 60) // self._heartbeat
+        self._weather_ticks = 0
+        self._weather_ticks_needed = (POLL_WEATHER * 60) // self._heartbeat
         self._location_retry_ticks = 0
         self._lat_source = "Domoticz"
         self._lon_source = "Domoticz"
@@ -688,7 +674,7 @@ class BasePlugin:
         Domoticz.Log(f"Plugin started - version {self._plugin_version()}")
         Domoticz.Log(f"lat={self._lat}, lon={self._lon} ({self._location_source_summary()})")
 
-        self._fetch_async(fetch_openmeteo=True)
+        self._fetch_async(fetch_weather=True)
 
     def onStop(self):
         Domoticz.Log("Plugin stopped")
@@ -732,14 +718,14 @@ class BasePlugin:
             return
 
         self._ticks += 1
-        self._openmeteo_ticks += 1
+        self._weather_ticks += 1
         ticks_needed = (self._interval * 60) // self._heartbeat
         if self._ticks >= ticks_needed:
             self._ticks = 0
-            fetch_openmeteo = self._openmeteo_ticks >= self._openmeteo_ticks_needed
-            if fetch_openmeteo:
-                self._openmeteo_ticks = 0
-            self._fetch_async(fetch_openmeteo)
+            fetch_weather = self._weather_ticks >= self._weather_ticks_needed
+            if fetch_weather:
+                self._weather_ticks = 0
+            self._fetch_async(fetch_weather)
 
     def _resolve_location(self) -> bool:
         manual_lat_raw = self._read_migrated_parameter("Latitude", "Mode1", "")
@@ -782,11 +768,11 @@ class BasePlugin:
         lon = normalize_coordinate(parts[1])
         return lat, lon
 
-    def _fetch_async(self, fetch_openmeteo: bool = True):
-        t = threading.Thread(target=self._fetch_and_update, args=(fetch_openmeteo,), daemon=True)
+    def _fetch_async(self, fetch_weather: bool = True):
+        t = threading.Thread(target=self._fetch_and_update, args=(fetch_weather,), daemon=True)
         t.start()
 
-    def _fetch_and_update(self, fetch_openmeteo: bool = True):
+    def _fetch_and_update(self, fetch_weather: bool = True):
         url = BUIENRADAR_URL.format(lat=self._lat, lon=self._lon)
         try:
             data = http_get_with_retry(url, timeout=10)
@@ -805,9 +791,9 @@ class BasePlugin:
             self.message_queue.put({"type": "error", "msg": "Unexpected format in Buienradar response"})
             return
 
-        # When fetch_openmeteo is False, send None so onHeartbeat reuses the
+        # When fetch_weather is False, send None so onHeartbeat reuses the
         # last cached self._weather_info value instead of fetching a fresh one.
-        weather_info = self._fetch_weather_info() if fetch_openmeteo else None
+        weather_info = self._fetch_weather_info() if fetch_weather else None
 
         self.message_queue.put({
             "type": "data",
@@ -816,58 +802,25 @@ class BasePlugin:
         })
 
     def _fetch_weather_info(self) -> Optional[dict]:
-        url = OPEN_METEO_URL.format(lat=self._lat, lon=self._lon)
         try:
-            raw = http_get_with_retry(url, timeout=10)
+            raw = http_get_with_retry(BUIENRADAR_FEED_URL, timeout=10)
         except urllib.error.HTTPError as e:
-            self.message_queue.put({"type": "error", "msg": f"Open-Meteo HTTP error (status code: {e.code})"})
+            self.message_queue.put({"type": "error", "msg": f"Buienradar weather feed HTTP error (status code: {e.code})"})
             return None
         except Exception as e:
-            self.message_queue.put({"type": "error", "msg": f"Open-Meteo connection error: {e}"})
+            self.message_queue.put({"type": "error", "msg": f"Buienradar weather feed connection error: {e}"})
             return None
 
         try:
-            json_data = json.loads(raw)
-        except ValueError:
-            self.message_queue.put({"type": "error", "msg": "Unexpected format in Open-Meteo response"})
+            stations = parse_station_feed(raw)
+        except (ValueError, AttributeError):
+            self.message_queue.put({"type": "error", "msg": "Unexpected format in Buienradar weather feed"})
             return None
 
-        current = json_data.get("current")
-        if not current:
-            self.message_queue.put({"type": "error", "msg": "Missing 'current' data in Open-Meteo response"})
-            return None
-
-        weather_info = {}
-
-        try:
-            weather_info["temperature"] = float(current["temperature_2m"])
-        except (KeyError, TypeError, ValueError):
-            pass
-
-        try:
-            weather_info["windspeed_bft"] = kmh_to_beaufort(float(current["wind_speed_10m"]))
-        except (KeyError, TypeError, ValueError):
-            pass
-
-        try:
-            weather_info["winddirection"] = degrees_to_compass(float(current["wind_direction_10m"]), self._language)
-        except (KeyError, TypeError, ValueError):
-            pass
-
-        try:
-            wmo_code = int(current["weather_code"])
-            weather_info["wmo_code"] = wmo_code
-            wmo_descriptions = WMO_DESCRIPTIONS_BY_LANG.get(self._language, WMO_DESCRIPTIONS)
-            weather_info["weatherdescription"] = wmo_descriptions.get(wmo_code, "")
-        except (KeyError, TypeError, ValueError):
-            pass
-
-        try:
-            weather_info["is_day"] = bool(int(current["is_day"]))
-        except (KeyError, TypeError, ValueError):
-            pass
-
-        return weather_info or None
+        weather_info = pick_weather_info(stations, float(self._lat), float(self._lon), self._language)
+        if weather_info is None:
+            self.message_queue.put({"type": "error", "msg": f"No Buienradar weather station within {MAX_STATION_KM} km of this location"})
+        return weather_info
 
     def _process(self, data: str, weather_info: Optional[dict]):
         p = parse_buienradar(data)
@@ -875,7 +828,7 @@ class BasePlugin:
         status_html, status_log = append_weather_to_status(
             status_html,
             status_log,
-            weather_info,
+            apply_rain_override(weather_info, p["mm_now"], self._language),
             self._text_mode
         )
 
